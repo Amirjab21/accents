@@ -39,6 +39,7 @@ pyarrow==19.0.1
 pydantic==2.10.6
 pydantic_core==2.27.2
 python-dateutil==2.9.0.post0
+librosa==0.10.2.post1
 pytz==2025.1
 PyYAML==6.0.2
 RapidFuzz==3.12.2
