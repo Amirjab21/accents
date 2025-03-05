@@ -56,6 +56,9 @@ combined_full = pd.concat([df, dataset_vctk])
 
 both_datasets = pd.concat([df, dataset_vctk]).drop(columns=['speaker_id', 'line_id'])
 
+if DEVICE != "cuda":
+    both_datasets = both_datasets.sample(n=100)
+
 
 class ModifiedWhisper(torch.nn.Module):
     def __init__(self, dims: int, num_accent_classes: int, whisper: Whisper):
@@ -147,8 +150,8 @@ model.to(DEVICE)
 
 batch_size=16
 # Update the data loading section
-scottish_df = df[df['dialect'] == 'scottish']
-southern_df = df[df['dialect'] == 'southern']
+scottish_df = both_datasets[both_datasets['dialect'] == 'scottish']
+southern_df = both_datasets[both_datasets['dialect'] == 'southern']
 
 # Calculate split sizes for each dialect
 scottish_train_size = int(0.95 * len(scottish_df))
@@ -167,6 +170,7 @@ train_df = pd.concat([scottish_train.dataset.iloc[scottish_train.indices],
                      southern_train.dataset.iloc[southern_train.indices]])
 test_df = pd.concat([scottish_test.dataset.iloc[scottish_test.indices], 
                     southern_test.dataset.iloc[southern_test.indices]])
+
 
 train_dataset = ContrastiveDataset(train_df)
 test_dataset = ContrastiveDataset(test_df)
@@ -220,15 +224,24 @@ def evaluate(model, dataloader):
             text = batch['text'].to(DEVICE)
             target = batch['target'].to(DEVICE)
             output = model(mel, text)
+            # Calculate weighted loss
             batch_loss = criterion(output, target)
             total_loss += batch_loss.item()
+            
+            # Calculate accuracy
+            pred = output.argmax(dim=1)
+            correct += (pred == target).sum().item()
+            total += target.size(0)
     
     avg_loss = total_loss / len(dataloader)
+    accuracy = correct / total
+    
     if avg_loss < best_loss:
         best_loss = avg_loss
         torch.save(model.state_dict(), 'best_model.pt')
+    
     model.train()
-    return avg_loss
+    return avg_loss, accuracy
 
 
 def train(model, dataloader, optimizer, number_epochs):
@@ -255,8 +268,8 @@ def train(model, dataloader, optimizer, number_epochs):
             
             wandb.log({"batch loss": batch_loss.item()})
             total_loss += batch_loss.item()
-        val_loss = evaluate(model, test_loader)
-        wandb.log({"val loss": val_loss, "epoch": epoch})
+        val_loss, val_acc = evaluate(model, test_loader)
+        wandb.log({"val loss": val_loss, "epoch": epoch, "val acc": val_acc})
         print(f"Epoch {epoch} loss: {total_loss / len(train_loader)}")
 
 

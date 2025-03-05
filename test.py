@@ -32,7 +32,7 @@ margin = 0.13
 num_accent_classes = 2
 id_to_accent = {0: "scottish", 1: "southern"}
 lora = True
-finetuned_model_path = "best_model0.04.pt"
+finetuned_model_path = "model_both_datasets.pt"
 
 
 
@@ -117,7 +117,7 @@ class ContrastiveDataset(torch.utils.data.Dataset):
         
         # Get all wav files and their corresponding txt files
         data_path = Path(data_dir)
-        wav_files = list(data_path.glob("*.wav"))[:90]  # Limit to 10 files
+        wav_files = list(data_path.glob("*.wav"))[:50]  # Limit to 90 files
         self.samples = []
         
         for wav_file in wav_files:
@@ -172,11 +172,6 @@ class ContrastiveDataset(torch.utils.data.Dataset):
 
 model = ModifiedWhisper(base_whisper_model.dims, num_accent_classes, base_whisper_model)
 
-# peft_config = LoraConfig(
-#      inference_mode=False, r=8,target_modules=["out", "token_embedding", "query", "key", "value", "proj_out"] , lora_alpha=32, lora_dropout=0.1
-# )
-# model = get_peft_model(model, peft_config)
-# model.print_trainable_parameters()
 
 if lora:
     print('lora', lora)
@@ -198,11 +193,9 @@ if lora:
         print(f"Error loading state dict:{e}")
 elif finetuned_model_path is not None:
         print('no lora')
-        # model = get_peft_model(model, peft_config)
         checkpoint_path = str(Path(__file__).parent / finetuned_model_path)
         print(checkpoint_path, 'checkpoint path')
         checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
-        # print(checkpoint, 'checkpoint')
         try:
             if 'model_state_dict' in checkpoint:
                 model.load_state_dict(checkpoint['model_state_dict'])
@@ -215,37 +208,110 @@ else:
     print('standard whisper model')
 
 
-dataset = ContrastiveDataset("data/scottish/p262")
-# dataset = ContrastiveDataset("data/english/p268")
-
-test_loader = DataLoader(dataset, batch_size=10, shuffle=True)
-
-
-def evaluate(model, dataloader):
+def evaluate(model, dataloader, dialect):
     model.eval()
-    total_loss = 0
-    criterion = torch.nn.CrossEntropyLoss()
+    total_scottish_count = 0
+    total_samples = 0
+    if dialect == "scottish":
+        target = 0
+    else:
+        target = 1
+
     with torch.no_grad():
         for batch in dataloader:
-            # Get embeddings for both Scottish and English samples
             mel = batch['mel'].to(DEVICE)
             text = batch['text'].to(DEVICE)
             target = batch['target'].to(DEVICE)
             output = model(mel, text)
-            print(output.shape, 'output.shape')
-            print(output, 'output')
             probabilities = torch.nn.functional.softmax(output, dim=1)
-            print(probabilities, 'probabilities')  # This will show values between 0 and 1 that sum to 1
 
             predictions = torch.argmax(probabilities, dim=1)
-            scottish_count = (predictions == 0).sum().item()
+            scottish_count = (predictions == target).sum().item()
             
             print(probabilities, 'probabilities')
-            print(f"Number of samples classified as Scottish: {scottish_count} out of {len(predictions)}")
+            print(f"Number of samples classified as {dialect}: {scottish_count} out of {len(predictions)}")
+            total_scottish_count += scottish_count
+            total_samples += len(predictions)
+    return total_scottish_count / total_samples
 
 
+
+
+
+scottish_speakers = ["p284", "p285", "p281", "p275", "p272"]
+english_speakers = ["p277", "p278", "p279", "p286", "p287"]
+
+
+def evaluate_on_language(model, language, speakers):
+    accuracies = []
+    for speaker in speakers:
+        dataset = ContrastiveDataset(f"data/{language}/{speaker}")
+        test_loader = DataLoader(dataset, batch_size=10, shuffle=True)
+        accuracy = evaluate(model, test_loader, language)
+        accuracies.append(accuracy)
+        print(f"accuracy for {speaker}: {accuracy}")
     
-val_loss = evaluate(model, test_loader)
+    for i in range(len(accuracies)):
+        print(f"accuracy for {speakers[i]}: {accuracies[i]}")
+
+
+# evaluate_on_language(model, "scottish", scottish_speakers)
 
 
 
+scottish_speakers_in_training = ["p234", "p237", "p241", "p246", "p247"]
+english_speakers_in_training = ["p226", "p225", "p227", "p228", "p229"]
+
+# evaluate_on_language(model, "scottish", scottish_speakers_in_training)
+evaluate_on_language(model, "english", english_speakers_in_training)
+
+
+
+
+
+########OLD MODEL TRAINED ONLY ON LACOMBA DATASET########
+#Its able to classify the 3rd scottish person very well (p281), also it does well for p275
+
+#It does terribly for p285
+
+#For english, it does terribly on p286 and p278
+
+#Scottish
+# accuracy for p284: 0.6888888888888889
+# accuracy for p285: 0.25555555555555554
+# accuracy for p281: 0.8777777777777778
+# accuracy for p275: 0.8
+# accuracy for p272: 0.7111111111111111
+
+# accuracies:
+#English
+# accuracy for p287: 0.6777777777777778
+# accuracy for p286: 0.37777777777777777
+# accuracy for p279: 0.7111111111111111
+# accuracy for p278: 0.32222222222222224
+# accuracy for p277: 0.8
+
+
+
+#########NEW MODEL TRAINED ON BOTH DATASETS########
+#SCOTTISH PEOPLE
+# accuracy for p284: 0.7333333333333333
+# accuracy for p285: 0.3
+# accuracy for p281: 0.6
+# accuracy for p275: 0.9444444444444444
+# accuracy for p272: 0.8666666666666667
+
+
+#ENGLISH PEOPLE
+
+# accuracy for p277: 0.24444444444444444
+# accuracy for p278: 0.022222222222222223
+# accuracy for p279: 0.03333333333333333
+# accuracy for p286: 0.07777777777777778
+# accuracy for p287: 0.13333333333333333
+
+
+#The new model performs even worse on English. It seems to do OK on scottish.
+
+#Model didn't get any better.
+    
