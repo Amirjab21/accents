@@ -16,7 +16,7 @@ import pandas as pd
 from datasets import Audio, concatenate_datasets, load_dataset
 import io
 from scipy.io import wavfile
-
+import librosa
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 wer_metric = load("wer")
@@ -49,6 +49,12 @@ combined_dataset = concatenate_datasets([scottish_dataset, southern_dataset, sco
 # Convert to pandas dataframe
 df = combined_dataset.to_pandas()
 
+dataset_vctk = pd.read_pickle("accent_dataset.pkl")
+
+
+combined_full = pd.concat([df, dataset_vctk])
+
+both_datasets = pd.concat([df, dataset_vctk]).drop(columns=['speaker_id', 'line_id'])
 
 
 class ModifiedWhisper(torch.nn.Module):
@@ -83,6 +89,12 @@ def bytes_to_array(audio_bytes):
     
     # Convert to float32 and normalize to [-1, 1]
     audio_array = audio_array.astype(np.float32) / 32768.0
+    if sample_rate != 16000:
+        audio_array = librosa.core.resample(
+            y=audio_array,
+            orig_sr=sample_rate,
+            target_sr=16000
+        )
     
     return sample_rate, audio_array
 
@@ -161,7 +173,7 @@ test_dataset = ContrastiveDataset(test_df)
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, 
                          num_workers=6 if torch.cuda.is_available() else 0, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True,
                         num_workers=6 if torch.cuda.is_available() else 0, pin_memory=True)
 
 
