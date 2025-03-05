@@ -52,8 +52,6 @@ df = combined_dataset.to_pandas()
 dataset_vctk = pd.read_pickle("accent_dataset.pkl")
 
 
-combined_full = pd.concat([df, dataset_vctk])
-
 both_datasets = pd.concat([df, dataset_vctk]).drop(columns=['speaker_id', 'line_id'])
 
 if DEVICE != "cuda":
@@ -150,15 +148,9 @@ model.to(DEVICE)
 
 batch_size=16
 
-# print("both", len(both_datasets))
-# Update the data loading section
 
-
-scottish_df = dataset_vctk[dataset_vctk['dialect'] == 'scottish']
-southern_df = dataset_vctk[dataset_vctk['dialect'] == 'southern']
-
-# print("scottish", len(scottish_df))
-# print("southern", len(southern_df))
+scottish_df = both_datasets[both_datasets['dialect'] == 'scottish']
+southern_df = both_datasets[both_datasets['dialect'] == 'southern']
 
 # Calculate split sizes for each dialect
 scottish_train_size = int(0.95 * len(scottish_df))

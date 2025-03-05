@@ -32,7 +32,7 @@ margin = 0.13
 num_accent_classes = 2
 id_to_accent = {0: "scottish", 1: "southern"}
 lora = True
-finetuned_model_path = "model_both_datasets.pt"
+finetuned_model_path = "best_model0.04.pt"
 
 
 
@@ -221,14 +221,12 @@ def evaluate(model, dataloader, dialect):
         for batch in dataloader:
             mel = batch['mel'].to(DEVICE)
             text = batch['text'].to(DEVICE)
-            target = batch['target'].to(DEVICE)
             output = model(mel, text)
             probabilities = torch.nn.functional.softmax(output, dim=1)
-
             predictions = torch.argmax(probabilities, dim=1)
+            
             scottish_count = (predictions == target).sum().item()
             
-            print(probabilities, 'probabilities')
             print(f"Number of samples classified as {dialect}: {scottish_count} out of {len(predictions)}")
             total_scottish_count += scottish_count
             total_samples += len(predictions)
@@ -245,7 +243,7 @@ english_speakers = ["p277", "p278", "p279", "p286", "p287"]
 def evaluate_on_language(model, language, speakers):
     accuracies = []
     for speaker in speakers:
-        dataset = ContrastiveDataset(f"data/{language}/{speaker}")
+        dataset = ContrastiveDataset(f"data/test/{language}/{speaker}")
         test_loader = DataLoader(dataset, batch_size=10, shuffle=True)
         accuracy = evaluate(model, test_loader, language)
         accuracies.append(accuracy)
@@ -253,7 +251,9 @@ def evaluate_on_language(model, language, speakers):
     
     for i in range(len(accuracies)):
         print(f"accuracy for {speakers[i]}: {accuracies[i]}")
-
+    total_accuracy = sum(accuracies) / len(accuracies)
+    print(f"total accuracy: {total_accuracy}")
+    return total_accuracy
 
 # evaluate_on_language(model, "scottish", scottish_speakers)
 
@@ -262,56 +262,16 @@ def evaluate_on_language(model, language, speakers):
 scottish_speakers_in_training = ["p234", "p237", "p241", "p246", "p247"]
 english_speakers_in_training = ["p226", "p225", "p227", "p228", "p229"]
 
-# evaluate_on_language(model, "scottish", scottish_speakers_in_training)
-evaluate_on_language(model, "english", english_speakers_in_training)
+accuracy_scottish = evaluate_on_language(model, "scottish", scottish_speakers)
+accuracy_english = evaluate_on_language(model, "english", english_speakers)
+
+total_accuracy = (accuracy_scottish + accuracy_english) / 2
+print(f"total accuracy: {total_accuracy}")
 
 
 
 
 
-########OLD MODEL TRAINED ONLY ON LACOMBA DATASET########
-#Its able to classify the 3rd scottish person very well (p281), also it does well for p275
-
-#It does terribly for p285
-
-#For english, it does terribly on p286 and p278
-
-#Scottish
-# accuracy for p284: 0.6888888888888889
-# accuracy for p285: 0.25555555555555554
-# accuracy for p281: 0.8777777777777778
-# accuracy for p275: 0.8
-# accuracy for p272: 0.7111111111111111
-
-# accuracies:
-#English
-# accuracy for p287: 0.6777777777777778
-# accuracy for p286: 0.37777777777777777
-# accuracy for p279: 0.7111111111111111
-# accuracy for p278: 0.32222222222222224
-# accuracy for p277: 0.8
-
-
-
-#########NEW MODEL TRAINED ON BOTH DATASETS########
-#SCOTTISH PEOPLE
-# accuracy for p284: 0.7333333333333333
-# accuracy for p285: 0.3
-# accuracy for p281: 0.6
-# accuracy for p275: 0.9444444444444444
-# accuracy for p272: 0.8666666666666667
-
-
-#ENGLISH PEOPLE
-
-# accuracy for p277: 0.24444444444444444
-# accuracy for p278: 0.022222222222222223
-# accuracy for p279: 0.03333333333333333
-# accuracy for p286: 0.07777777777777778
-# accuracy for p287: 0.13333333333333333
-
-
-#The new model performs even worse on English. It seems to do OK on scottish.
-
-#Model didn't get any better.
-    
+######################################################################################
+###################################### best_model_both.pt ###########################
+########################total accuracy 0.90#######################################
