@@ -57,7 +57,7 @@ combined_full = pd.concat([df, dataset_vctk])
 both_datasets = pd.concat([df, dataset_vctk]).drop(columns=['speaker_id', 'line_id'])
 
 if DEVICE != "cuda":
-    both_datasets = both_datasets.sample(n=100)
+    both_datasets = both_datasets.sample(n=54)
 
 
 class ModifiedWhisper(torch.nn.Module):
@@ -171,7 +171,6 @@ train_df = pd.concat([scottish_train.dataset.iloc[scottish_train.indices],
 test_df = pd.concat([scottish_test.dataset.iloc[scottish_test.indices], 
                     southern_test.dataset.iloc[southern_test.indices]])
 
-
 train_dataset = ContrastiveDataset(train_df)
 test_dataset = ContrastiveDataset(test_df)
 
@@ -216,6 +215,8 @@ def evaluate(model, dataloader):
     model.eval()
     total_loss = 0
     best_loss = float('inf')
+    correct = 0
+    total = 0
     criterion = torch.nn.CrossEntropyLoss()
     with torch.no_grad():
         for batch in dataloader:
@@ -232,7 +233,6 @@ def evaluate(model, dataloader):
             pred = output.argmax(dim=1)
             correct += (pred == target).sum().item()
             total += target.size(0)
-    
     avg_loss = total_loss / len(dataloader)
     accuracy = correct / total
     
