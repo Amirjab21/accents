@@ -149,9 +149,16 @@ model.to(DEVICE)
 
 
 batch_size=16
+
+# print("both", len(both_datasets))
 # Update the data loading section
-scottish_df = both_datasets[both_datasets['dialect'] == 'scottish']
-southern_df = both_datasets[both_datasets['dialect'] == 'southern']
+
+
+scottish_df = dataset_vctk[dataset_vctk['dialect'] == 'scottish']
+southern_df = dataset_vctk[dataset_vctk['dialect'] == 'southern']
+
+# print("scottish", len(scottish_df))
+# print("southern", len(southern_df))
 
 # Calculate split sizes for each dialect
 scottish_train_size = int(0.95 * len(scottish_df))
@@ -171,6 +178,17 @@ train_df = pd.concat([scottish_train.dataset.iloc[scottish_train.indices],
 test_df = pd.concat([scottish_test.dataset.iloc[scottish_test.indices], 
                     southern_test.dataset.iloc[southern_test.indices]])
 
+print("test_df", len(test_df))
+print("train_df", len(train_df))
+
+scottish_in_test = test_df[test_df['dialect'] == 'scottish']
+southern_in_test = test_df[test_df['dialect'] == 'southern']
+
+print("scottish_in_test", len(scottish_in_test))
+print("southern_in_test", len(southern_in_test))
+
+
+
 train_dataset = ContrastiveDataset(train_df)
 test_dataset = ContrastiveDataset(test_df)
 
@@ -180,35 +198,10 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True,
                         num_workers=6 if torch.cuda.is_available() else 0, pin_memory=True)
 
 
-# def choose_layers_to_finetune(model):
-#     for name, param in model.encoder.named_parameters():
-#         param.requires_grad = False
-#         # if 'conv1' in name or 'conv2' in name:
-#         #     param.requires_grad = True
-#     # Freeze most of decoder except token embeddings and last 2 attention layers
-#     for name, param in model.decoder.named_parameters():
-#         param.requires_grad = False  # First freeze everything
-        
-#         # # Unfreeze token embeddings
-#         if 'token_embedding' in name:
-#             param.requires_grad = True
-            
-#         # # Unfreeze last 2 attention layers
-#         # Whisper decoder has 16 layers (0-15), so we want layers 14 and 15
-#         if any(f'layers.{i}.' in name for i in [11,12,13,14, 15]):
-#             param.requires_grad = True
-#     trainable_params = 0
-#     all_param = 0
-#     for name, param in model.named_parameters():
-#         all_param += param.numel()
-#         if param.requires_grad:
-#             print(f"Trainable: {name}")
-#             trainable_params += param.numel()
-#     print(
-#         f"trainable params: {trainable_params:,d} || all params: {all_param:,d} "
-#         f"|| trainable%: {100 * trainable_params / all_param:.2f}%"
-#     )
-# choose_layers_to_finetune(model)
+class_counts = train_df['dialect'].value_counts()
+total_samples = len(train_df)
+class_weights = torch.FloatTensor([total_samples / (len(class_counts) * count) for count in class_counts])
+class_weights = class_weights.to(DEVICE)
 
 
 def evaluate(model, dataloader):
@@ -217,7 +210,7 @@ def evaluate(model, dataloader):
     best_loss = float('inf')
     correct = 0
     total = 0
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
     with torch.no_grad():
         for batch in dataloader:
             # Get embeddings for both Scottish and English samples
@@ -247,7 +240,7 @@ def evaluate(model, dataloader):
 def train(model, dataloader, optimizer, number_epochs):
     wandb.init(project="finetune-contrastive-scottish", name=name_of_run)
     model.train()
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
     for epoch in range(number_epochs):
         total_loss = 0
         progress_bar = tqdm(
@@ -277,7 +270,7 @@ def train(model, dataloader, optimizer, number_epochs):
 
 processor = train_dataset.processor
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-number_epochs = 3
+number_epochs = 1
 
 train(model, train_loader, optimizer, number_epochs)
 
