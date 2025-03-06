@@ -93,19 +93,19 @@ def main():
     pca = PCA(n_components=2)
     pca_result = pca.fit_transform(embeddings)
 
-    distinct_colors = [
-        '#e41a1c',  # Red
-        '#377eb8',  # Blue
-        '#4daf4a',  # Green
-        '#984ea3',  # Purple
-        '#ff7f00',  # Orange
-        '#ffff33',  # Yellow
-        '#a65628',  # Brown
-        '#f781bf',  # Pink
-        '#00ffff',  # Cyan
-        '#808080',  # Gray
-        '#000000',  # Black
-    ]
+    distinct_colors = {
+        0: '#000080',  # Scottish - Navy Blue
+        1: '#1E90FF',  # English - Dodger Blue
+        2: '#FFA500',  # Indian - Orange
+        3: '#4169E1',  # Irish - Royal Blue
+        4: '#87CEEB',  # Welsh - Sky Blue
+        5: '#90EE90',  # NewZealandEnglish - Light Green
+        6: '#228B22',  # AustralianEnglish - Forest Green
+        7: '#32CD32',  # SouthAfrican - Lime Green
+        8: '#8B0000',  # Canadian - Dark Red
+        9: '#800080',  # NorthernIrish - Purple
+        10: '#FF0000', # American - Bright Red
+    }
     
     # PCA visualization
     fig = plt.figure(figsize=(20, 8))
