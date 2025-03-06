@@ -68,7 +68,7 @@ def main():
 
     dataset_df = load_datasets()
     model = load_model()
-    dataloader = prepare_data(dataset_df, samples_per_accent=5)
+    dataloader = prepare_data(dataset_df, samples_per_accent=20)
     model.eval()
     # After running your model:
     embeddings = []
@@ -108,29 +108,58 @@ def main():
     ]
     
     # PCA visualization
-    plt.figure(figsize=(12, 8))
+    fig = plt.figure(figsize=(20, 8))
+    
+    # PCA visualization - 2D
+    plt.subplot(121)
     for i in range(NUM_ACCENT_CLASSES):
         mask = accent_labels == i
         plt.scatter(pca_result[mask, 0], pca_result[mask, 1], 
                    color=distinct_colors[i], label=ID_TO_ACCENT[i], alpha=0.6)
     plt.grid(True, alpha=0.3)
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.title('PCA visualization of accent embeddings')
+    plt.title('PCA visualization of accent embeddings (2D)')
+    
+    # PCA visualization - 3D
+    pca3d = PCA(n_components=3)
+    pca3d_result = pca3d.fit_transform(embeddings)
+    
+    ax = fig.add_subplot(122, projection='3d')
+    for i in range(NUM_ACCENT_CLASSES):
+        mask = accent_labels == i
+        ax.scatter(pca3d_result[mask, 0], pca3d_result[mask, 1], pca3d_result[mask, 2],
+                  color=distinct_colors[i], label=ID_TO_ACCENT[i], alpha=0.6)
+    ax.grid(True, alpha=0.3)
+    ax.set_title('PCA visualization of accent embeddings (3D)')
     plt.tight_layout()
     plt.show()
 
-    # t-SNE visualization
+    # t-SNE visualizations
+    fig = plt.figure(figsize=(20, 8))
+    
+    # t-SNE - 2D
+    plt.subplot(121)
     tsne = TSNE(n_components=2, random_state=42)
     tsne_result = tsne.fit_transform(embeddings)
-
-    plt.figure(figsize=(12, 8))
     for i in range(NUM_ACCENT_CLASSES):
         mask = accent_labels == i
         plt.scatter(tsne_result[mask, 0], tsne_result[mask, 1], 
                    color=distinct_colors[i], label=ID_TO_ACCENT[i], alpha=0.6)
     plt.grid(True, alpha=0.3)
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.title('t-SNE visualization of accent embeddings')
+    plt.title('t-SNE visualization of accent embeddings (2D)')
+    
+    # t-SNE - 3D
+    tsne3d = TSNE(n_components=3, random_state=42)
+    tsne3d_result = tsne3d.fit_transform(embeddings)
+    
+    ax = fig.add_subplot(122, projection='3d')
+    for i in range(NUM_ACCENT_CLASSES):
+        mask = accent_labels == i
+        ax.scatter(tsne3d_result[mask, 0], tsne3d_result[mask, 1], tsne3d_result[mask, 2],
+                  color=distinct_colors[i], label=ID_TO_ACCENT[i], alpha=0.6)
+    ax.grid(True, alpha=0.3)
+    ax.set_title('t-SNE visualization of accent embeddings (3D)')
     plt.tight_layout()
     plt.show()
 
