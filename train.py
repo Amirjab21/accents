@@ -22,9 +22,8 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 wer_metric = load("wer")
 model_variant = "small"
 name_of_run = "finetune-decoder-only and compare english scores to scottish"
-margin = 0.13
-num_accent_classes = 2
-id_to_accent = {0: "scottish", 1: "southern"}
+num_accent_classes = 11
+id_to_accent = {0: "Scottish", 1: "English", 2: "Indian", 3: "Irish", 4: "Welsh", 5: "NewZealandEnglish", 6: "AustralianEnglish", 7: "SouthAfrican", 8: "Canadian", 9: "NorthernIrish", 10: "American"}
 
 
 base_whisper_model = load_model(model_variant, device=DEVICE)
@@ -37,22 +36,29 @@ dataset_hf_southern['train'] = dataset_hf_southern['train'].cast_column("audio",
 dataset_hf_southern_women = load_dataset("ylacombe/english_dialects", "southern_female")
 dataset_hf_southern_women['train'] = dataset_hf_southern_women['train'].cast_column("audio", Audio(sampling_rate=16000))
 
-scottish_dataset = dataset_hf_scottish['train'].add_column("dialect", ["scottish"] * len(dataset_hf_scottish['train']))
-scottish_dataset_women = dataset_hf_scottish_women['train'].add_column("dialect", ["scottish"] * len(dataset_hf_scottish_women['train']))
+scottish_dataset = dataset_hf_scottish['train'].add_column("dialect", ["Scottish"] * len(dataset_hf_scottish['train']))
+scottish_dataset_women = dataset_hf_scottish_women['train'].add_column("dialect", ["Scottish"] * len(dataset_hf_scottish_women['train']))
 # Prepare Southern dataset with source column
-southern_dataset = dataset_hf_southern['train'].add_column("dialect", ["southern"] * len(dataset_hf_southern['train']))
-southern_dataset_women = dataset_hf_southern_women['train'].add_column("dialect", ["southern"] * len(dataset_hf_southern_women['train']))
+southern_dataset = dataset_hf_southern['train'].add_column("dialect", ["English"] * len(dataset_hf_southern['train']))
+southern_dataset_women = dataset_hf_southern_women['train'].add_column("dialect", ["English"] * len(dataset_hf_southern_women['train']))
 
-# Combine the datasets
+
 combined_dataset = concatenate_datasets([scottish_dataset, southern_dataset, scottish_dataset_women, southern_dataset_women])
-
-# Convert to pandas dataframe
 df = combined_dataset.to_pandas()
 
-dataset_vctk = pd.read_pickle("accent_dataset.pkl")
 
+# Load each shard individually
+shard1 = load_dataset("Amirjab21/vctk-accents", data_files="accent_dataset_shard_1.parquet", split="train")
+shard2 = load_dataset("Amirjab21/vctk-accents", data_files="accent_dataset_shard_2.parquet", split="train")
+shard3 = load_dataset("Amirjab21/vctk-accents", data_files="accent_dataset_shard_3.parquet", split="train")
 
-both_datasets = pd.concat([df, dataset_vctk]).drop(columns=['speaker_id', 'line_id'])
+combined_vctk = concatenate_datasets([shard1, shard2, shard3])
+df_vctk = combined_vctk.to_pandas()
+print("df_vctk", len(df_vctk))
+print("df", len(df))
+both_datasets = pd.concat([df, df_vctk])
+
+print(len(both_datasets))
 
 if DEVICE != "cuda":
     both_datasets = both_datasets.sample(n=54)
@@ -147,37 +153,23 @@ model.to(DEVICE)
 
 
 batch_size=16
+train_size = int(0.95 * len(both_datasets))
+test_size = len(both_datasets) - train_size
 
 
-scottish_df = both_datasets[both_datasets['dialect'] == 'scottish']
-southern_df = both_datasets[both_datasets['dialect'] == 'southern']
+train_df, test_df = torch.utils.data.random_split(
+    both_datasets, [train_size, test_size])
 
-# Calculate split sizes for each dialect
-scottish_train_size = int(0.95 * len(scottish_df))
-scottish_test_size = len(scottish_df) - scottish_train_size
-southern_train_size = int(0.95 * len(southern_df))
-southern_test_size = len(southern_df) - southern_train_size
 
-# Split each dialect separately
-scottish_train, scottish_test = torch.utils.data.random_split(
-    scottish_df, [scottish_train_size, scottish_test_size])
-southern_train, southern_test = torch.utils.data.random_split(
-    southern_df, [southern_train_size, southern_test_size])
+train_df = train_df.dataset
+test_df = test_df.dataset
 
-# Combine the splits
-train_df = pd.concat([scottish_train.dataset.iloc[scottish_train.indices], 
-                     southern_train.dataset.iloc[southern_train.indices]])
-test_df = pd.concat([scottish_test.dataset.iloc[scottish_test.indices], 
-                    southern_test.dataset.iloc[southern_test.indices]])
 
-print("test_df", len(test_df))
-print("train_df", len(train_df))
-
-scottish_in_test = test_df[test_df['dialect'] == 'scottish']
-southern_in_test = test_df[test_df['dialect'] == 'southern']
+scottish_in_test = test_df[test_df['dialect'] == 'Scottish']
+english_in_test = test_df[test_df['dialect'] == 'English']
 
 print("scottish_in_test", len(scottish_in_test))
-print("southern_in_test", len(southern_in_test))
+print("English_in_test", len(english_in_test))
 
 
 
@@ -190,10 +182,28 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True,
                         num_workers=6 if torch.cuda.is_available() else 0, pin_memory=True)
 
 
-class_counts = train_df['dialect'].value_counts()
+class_counts = {i: 0 for i in range(num_accent_classes)}
+for dialect in train_df['dialect']:
+    # Convert dialect name to ID using the same mapping as in ContrastiveDataset
+    dialect_id = {v: k for k, v in id_to_accent.items()}[dialect]
+    class_counts[dialect_id] += 1
+
 total_samples = len(train_df)
-class_weights = torch.FloatTensor([total_samples / (len(class_counts) * count) for count in class_counts])
+class_weights = torch.FloatTensor([
+    total_samples / (num_accent_classes * count) if count > 0 else 0.0 
+    for count in [class_counts[i] for i in range(num_accent_classes)]
+])
 class_weights = class_weights.to(DEVICE)
+
+# Add verification prints
+print("\nClass distribution and weights:")
+for class_id, count in class_counts.items():
+    weight = total_samples / (num_accent_classes * count) if count > 0 else 0.0
+    print(f"Dialect: {id_to_accent[class_id]}")
+    print(f"Count: {count}")
+    print(f"Weight: {weight:.4f}\n")
+
+print("Class weights tensor:", class_weights)
 
 
 def evaluate(model, dataloader):
@@ -277,56 +287,56 @@ torch.save({ 'model_state_dict': model.state_dict()}, checkpoint_path)
 
 
 
-scottish_predictions = []
-scottish_references = []
-southern_predictions = []
-southern_references = []
-scottish_wer = 0
-southern_wer = 0
-n_scottish = 0
-n_southern = 0
+# scottish_predictions = []
+# scottish_references = []
+# southern_predictions = []
+# southern_references = []
+# scottish_wer = 0
+# southern_wer = 0
+# n_scottish = 0
+# n_southern = 0
 
-model.eval()
-with torch.no_grad():
-    for batch in tqdm(test_loader, desc="Evaluating"):
-        mel = batch['mel'].to(DEVICE)
-        outputs = model.whisper.generate(mel)
-        batch_predictions = processor.batch_decode(outputs, skip_special_tokens=True)
+# model.eval()
+# with torch.no_grad():
+#     for batch in tqdm(test_loader, desc="Evaluating"):
+#         mel = batch['mel'].to(DEVICE)
+#         outputs = model.whisper.generate(mel)
+#         batch_predictions = processor.batch_decode(outputs, skip_special_tokens=True)
         
-        # Split predictions by dialect
-        for i, text in enumerate(batch['original']):
-            if batch['dialect'][i] == 'scottish':
-                scottish_predictions.append(batch_predictions[i])
-                scottish_references.append(text)
-                scottish_wer += wer_metric.compute(predictions=[batch_predictions[i]], 
-                                                 references=[text])
-                n_scottish += 1
-            else:  # southern
-                southern_predictions.append(batch_predictions[i])
-                southern_references.append(text)
-                southern_wer += wer_metric.compute(predictions=[batch_predictions[i]], 
-                                                 references=[text])
-                n_southern += 1
+#         # Split predictions by dialect
+#         for i, text in enumerate(batch['original']):
+#             if batch['dialect'][i] == 'scottish':
+#                 scottish_predictions.append(batch_predictions[i])
+#                 scottish_references.append(text)
+#                 scottish_wer += wer_metric.compute(predictions=[batch_predictions[i]], 
+#                                                  references=[text])
+#                 n_scottish += 1
+#             else:  # southern
+#                 southern_predictions.append(batch_predictions[i])
+#                 southern_references.append(text)
+#                 southern_wer += wer_metric.compute(predictions=[batch_predictions[i]], 
+#                                                  references=[text])
+#                 n_southern += 1
 
-        # Save first few predictions for logging
-        if len(scottish_predictions) >= 2 and len(southern_predictions) >= 2:
-            scottish_predictions = scottish_predictions[:2]
-            scottish_references = scottish_references[:2]
-            southern_predictions = southern_predictions[:2]
-            southern_references = southern_references[:2]
+#         # Save first few predictions for logging
+#         if len(scottish_predictions) >= 2 and len(southern_predictions) >= 2:
+#             scottish_predictions = scottish_predictions[:2]
+#             scottish_references = scottish_references[:2]
+#             southern_predictions = southern_predictions[:2]
+#             southern_references = southern_references[:2]
 
-print(f"Scottish WER: {scottish_wer/n_scottish:.4f}")
-print(f"Southern WER: {southern_wer/n_southern:.4f}")
+# print(f"Scottish WER: {scottish_wer/n_scottish:.4f}")
+# print(f"Southern WER: {southern_wer/n_southern:.4f}")
 
-with open('wer_results_initial.txt', 'w') as f:
-    f.write("Initial run\n\n")
-    f.write(f"First 2 Scottish predictions:\n")
-    f.write('\n'.join(scottish_predictions[:2]) + '\n\n')
-    f.write(f"First 2 Scottish original texts:\n")
-    f.write('\n'.join(scottish_references[:2]) + '\n\n')
-    f.write(f"First 2 Southern predictions:\n")
-    f.write('\n'.join(southern_predictions[:2]) + '\n\n')
-    f.write(f"First 2 Southern original texts:\n")
-    f.write('\n'.join(southern_references[:2]) + '\n\n')
-    f.write(f"Scottish WER: {scottish_wer/n_scottish:.4f}\n")
-    f.write(f"Southern WER: {southern_wer/n_southern:.4f}\n")
+# with open('wer_results_initial.txt', 'w') as f:
+#     f.write("Initial run\n\n")
+#     f.write(f"First 2 Scottish predictions:\n")
+#     f.write('\n'.join(scottish_predictions[:2]) + '\n\n')
+#     f.write(f"First 2 Scottish original texts:\n")
+#     f.write('\n'.join(scottish_references[:2]) + '\n\n')
+#     f.write(f"First 2 Southern predictions:\n")
+#     f.write('\n'.join(southern_predictions[:2]) + '\n\n')
+#     f.write(f"First 2 Southern original texts:\n")
+#     f.write('\n'.join(southern_references[:2]) + '\n\n')
+#     f.write(f"Scottish WER: {scottish_wer/n_scottish:.4f}\n")
+#     f.write(f"Southern WER: {southern_wer/n_southern:.4f}\n")
