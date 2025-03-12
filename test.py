@@ -32,7 +32,7 @@ margin = 0.13
 num_accent_classes = 2
 id_to_accent = {0: "scottish", 1: "southern"}
 lora = True
-finetuned_model_path = "best_model0.04.pt"
+finetuned_model_path = "model_11_accents_epoch_2.pt"
 
 
 
@@ -108,12 +108,13 @@ def bytes_to_array(audio_bytes):
     return sample_rate, audio_array
 
 class ContrastiveDataset(torch.utils.data.Dataset):
-    def __init__(self, data_dir, device=DEVICE, padding_token_id=50257):
+    def __init__(self, data_dir, device=DEVICE, padding_token_id=50257, language='scottish'):
         self.device = device
         self.processor = WhisperProcessor.from_pretrained("openai/whisper-small", language="English", task="transcribe")
         self.feature_extractor = self.processor.feature_extractor
         self.tokenizer = self.processor.tokenizer
         self.padding_token_id = padding_token_id
+        self.accent_to_id = {accent: id for id, accent in id_to_accent.items()}
         
         # Get all wav files and their corresponding txt files
         data_path = Path(data_dir)
@@ -125,7 +126,8 @@ class ContrastiveDataset(torch.utils.data.Dataset):
             if txt_file.exists():
                 self.samples.append({
                     'wav_path': str(wav_file),
-                    'txt_path': str(txt_file)
+                    'txt_path': str(txt_file),
+                    'dialect': language
                 })
 
     def __len__(self):
@@ -159,8 +161,8 @@ class ContrastiveDataset(torch.utils.data.Dataset):
                                    truncation=True, 
                                    max_length=400)
         
-        # Since this is Scottish data, we'll use 0 as the target (based on id_to_accent mapping)
-        target = torch.tensor(0, dtype=torch.long)  # 0 for Scottish
+        
+        target = torch.tensor(self.accent_to_id[sample['dialect']], dtype=torch.long)
 
         return {
             'mel': mel.input_features.squeeze(0),
@@ -212,15 +214,12 @@ def evaluate(model, dataloader, dialect):
     model.eval()
     total_scottish_count = 0
     total_samples = 0
-    if dialect == "scottish":
-        target = 0
-    else:
-        target = 1
 
     with torch.no_grad():
         for batch in dataloader:
             mel = batch['mel'].to(DEVICE)
             text = batch['text'].to(DEVICE)
+            target = batch['target'].to(DEVICE)
             output = model(mel, text)
             probabilities = torch.nn.functional.softmax(output, dim=1)
             predictions = torch.argmax(probabilities, dim=1)
@@ -243,7 +242,7 @@ english_speakers = ["p277", "p278", "p279", "p286", "p287"]
 def evaluate_on_language(model, language, speakers):
     accuracies = []
     for speaker in speakers:
-        dataset = ContrastiveDataset(f"data/test/{language}/{speaker}")
+        dataset = ContrastiveDataset(f"test/{language}/{speaker}", language=language)
         test_loader = DataLoader(dataset, batch_size=10, shuffle=True)
         accuracy = evaluate(model, test_loader, language)
         accuracies.append(accuracy)
@@ -263,7 +262,7 @@ scottish_speakers_in_training = ["p234", "p237", "p241", "p246", "p247"]
 english_speakers_in_training = ["p226", "p225", "p227", "p228", "p229"]
 
 accuracy_scottish = evaluate_on_language(model, "scottish", scottish_speakers)
-accuracy_english = evaluate_on_language(model, "english", english_speakers)
+accuracy_english = evaluate_on_language(model, "southern", english_speakers)
 
 total_accuracy = (accuracy_scottish + accuracy_english) / 2
 print(f"total accuracy: {total_accuracy}")
