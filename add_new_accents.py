@@ -71,8 +71,8 @@ def add_new_accents(model, number_existing_accents, existing_mapping, accent_nam
     
 
     # # Initialize new weights for the new classes
-    # torch.nn.init.xavier_uniform_(model.accent_classifier.weight[number_existing_accents:, :])
-    # torch.nn.init.zeros_(model.accent_classifier.bias[number_existing_accents:])
+    torch.nn.init.xavier_uniform_(model.base_model.model.accent_classifier.weight[number_existing_accents:, :])
+    torch.nn.init.zeros_(model.base_model.model.accent_classifier.bias[number_existing_accents:])
 
     # Define optimizer with different learning rates (optional)
     # optimizer = torch.optim.Adam([
