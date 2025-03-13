@@ -124,12 +124,12 @@ def main():
 
     new_dataset = load_new_dataset(['Amirjab21/commonvoice'])
 
-    # concatenated_df = pd.concat([dataset_df, new_dataset], ignore_index=True)
+    concatenated_df = pd.concat([dataset_df, new_dataset], ignore_index=True)
 
     #First, well try to just use the new data to see if training this alone can help.
     #If this doesnt work, you have to prepare_data with the concatented df above.
     train_loader_new_only, test_loader_new_only, train_df_new_only = prepare_data(new_dataset, new_id_to_accent)
-    # train_loader, test_loader, train_df = prepare_data(concatenated_df, new_id_to_accent)
+    train_loader_both, test_loader_both, train_df_both = prepare_data(concatenated_df, new_id_to_accent)
 
     class_weights_new = calculate_class_weights(train_df_new_only, new_number_accents, new_id_to_accent)
 
@@ -144,7 +144,7 @@ def main():
         run_name="add corp20 to training set"
     )
 
-    model = setup_model('best_model.pt', new_number_accents)
+    # model = setup_model('best_model.pt', new_number_accents)
 
     with open('results.txt', 'a') as f:
         f.write(f"ADD CORP20 TO TRAINING SET\n")
@@ -152,7 +152,7 @@ def main():
         f.write(f"number of accents: {new_number_accents}\n")
 
     #final eval
-    avg_loss, accuracy = evaluate(model, test_loader, class_weights_new, DEVICE, save_model=False)
+    avg_loss, accuracy = evaluate(model, test_loader_both, class_weights_new, DEVICE, save_model=False)
     with open('results.txt', 'a') as f:
         f.write(f"FINAL EVALUATION on new weights\n")
         f.write(f"Accuracy: {accuracy:.4f}\n")
