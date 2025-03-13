@@ -7,7 +7,10 @@ import librosa
 
 def bytes_to_array(audio_bytes):
     # Create a BytesIO object from the bytes
-    byte_io = io.BytesIO(audio_bytes['bytes'])
+    byte_data = audio_bytes['bytes'] if isinstance(audio_bytes, dict) else audio_bytes
+    
+    # Create a BytesIO object from the bytes
+    byte_io = io.BytesIO(byte_data)
     
     # Read the WAV file from BytesIO
     sample_rate, audio_array = wavfile.read(byte_io)

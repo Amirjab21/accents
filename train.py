@@ -8,6 +8,10 @@ from model.load_model import load_model
 from model.accent_model import ModifiedWhisper
 from training.accent_dataset import ContrastiveDataset
 from training.train_utils import train_model
+from pathlib import Path
+from training.train_utils import evaluate
+# import ipdb
+
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_VARIANT = "small"
@@ -18,7 +22,10 @@ ID_TO_ACCENT = {
     8: "Canadian", 9: "NorthernIrish", 10: "American"
 }
 
-def load_datasets():
+
+checkpoint_file = "model_11_accents_epoch_2.pt"
+
+def load_datasets(sample_size=None):
     # Load English dialects datasets
     dataset_hf_scottish = load_dataset("ylacombe/english_dialects", "scottish_male")
     dataset_hf_scottish['train'] = dataset_hf_scottish['train'].cast_column("audio", Audio(sampling_rate=16000))
@@ -50,11 +57,11 @@ def load_datasets():
     both_datasets = pd.concat([df, df_vctk])
     
     if DEVICE != "cuda":
-        both_datasets = both_datasets.sample(n=9000)
+        both_datasets = both_datasets.sample(n=sample_size)
     
     return both_datasets
 
-def prepare_data(dataset_df, batch_size=16):
+def prepare_data(dataset_df,ID_TO_ACCENT, batch_size=16):
     train_size = int(0.95 * len(dataset_df))
     test_size = len(dataset_df) - train_size
     
@@ -84,10 +91,12 @@ def prepare_data(dataset_df, batch_size=16):
     
     return train_loader, test_loader, train_df
 
-def calculate_class_weights(train_df):
+def calculate_class_weights(train_df, NUM_ACCENT_CLASSES, ID_TO_ACCENT):
     class_counts = {i: 0 for i in range(NUM_ACCENT_CLASSES)}
+    dialect_to_id = {v: k for k, v in ID_TO_ACCENT.items()}
     for dialect in train_df['dialect']:
-        dialect_id = {v: k for k, v in ID_TO_ACCENT.items()}[dialect]
+        print(dialect, 'dialect')
+        dialect_id = dialect_to_id[dialect]
         class_counts[dialect_id] += 1
 
     total_samples = len(train_df)
@@ -98,7 +107,7 @@ def calculate_class_weights(train_df):
     
     return class_weights.to(DEVICE)
 
-def setup_model():
+def setup_model(checkpoint_file = None):
     base_whisper_model = load_model(MODEL_VARIANT, device=DEVICE)
     model = ModifiedWhisper(base_whisper_model.dims, NUM_ACCENT_CLASSES, base_whisper_model)
     
@@ -110,21 +119,41 @@ def setup_model():
         lora_dropout=0.1
     )
     model = get_peft_model(model, peft_config)
+    if checkpoint_file:
+        checkpoint_path = str(Path(__file__).parent / checkpoint_file)
+        checkpoint = torch.load(checkpoint_path, map_location=torch.device(DEVICE))
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint)
+            print('Model loaded successfully')
     model.print_trainable_parameters()
+    
     model.to(DEVICE)
     
     return model
+
 
 def main():
     # Load and prepare data
     dataset_df = load_datasets()
     train_loader, test_loader, train_df = prepare_data(dataset_df)
-    class_weights = calculate_class_weights(train_df)
+    class_weights = calculate_class_weights(train_df, NUM_ACCENT_CLASSES)
     
     # Setup model and optimizer
-    model = setup_model()
+    model = setup_model(None)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+    avg_loss, accuracy = evaluate(model, test_loader, class_weights, DEVICE, save_model=False)
+
+        # Write results to file
+    with open('results.txt', 'w') as f:
+        f.write(f"INITIAL EVALUATION on existing weights\n")
+        f.write(f"Average Loss: {avg_loss:.4f}\n")
+        f.write(f"Accuracy: {accuracy:.4f}\n")
+
     
+
     # Train the model
     model = train_model(
         model=model,
@@ -137,9 +166,6 @@ def main():
         run_name="finetune-decoder-only and compare english scores to scottish"
     )
     
-    # Save the final model
-    checkpoint_path = 'best_model.pt'
-    torch.save({'model_state_dict': model.state_dict()}, checkpoint_path)
 
 if __name__ == "__main__":
     main()
