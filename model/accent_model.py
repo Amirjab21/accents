@@ -14,4 +14,4 @@ class ModifiedWhisper(torch.nn.Module):
         pooled_output = torch.mean(encoder_output, dim=1)
         
         accent_output = self.accent_classifier(pooled_output)
-        return accent_output, pooled_output
+        return accent_output
