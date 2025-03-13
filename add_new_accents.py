@@ -16,6 +16,9 @@ import os
 from datetime import datetime
 from huggingface_hub import hf_hub_download
 
+# export HF_TOKEN=hf_token
+#wandb login prior to script
+
 hf_token = os.getenv("HF_TOKEN")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_VARIANT = "small"
@@ -111,33 +114,48 @@ def main():
 
     avg_loss, accuracy = evaluate(model, test_loader, class_weights, DEVICE, save_model=False)
 
+    with open('results.txt', 'a') as f:
+        f.write(f"INITIAL EVALUATION on existing weights\n")
+        f.write(f"Accuracy: {accuracy:.4f}\n")
+
     new_accents = ['Scottish', 'NewZealandEnglish', 'Japanese', 'Canadian', 'AustralianEnglish', 'Irish', 'American', 'SouthAfrican', 'Indian', 'English', 'German', 'Filipino', 'Korean']
     model, new_id_to_accent, new_number_accents = add_new_accents(model, NUM_ACCENT_CLASSES, ID_TO_ACCENT, new_accents)
 
 
     new_dataset = load_new_dataset(['Amirjab21/commonvoice'])
 
-    concatenated_df = pd.concat([dataset_df, new_dataset], ignore_index=True)
+    # concatenated_df = pd.concat([dataset_df, new_dataset], ignore_index=True)
 
-    train_loader, test_loader, train_df = prepare_data(concatenated_df, new_id_to_accent)
+    #First, well try to just use the new data to see if training this alone can help.
+    #If this doesnt work, you have to prepare_data with the concatented df above.
+    train_loader_new_only, test_loader_new_only, train_df_new_only = prepare_data(new_dataset, new_id_to_accent)
+    # train_loader, test_loader, train_df = prepare_data(concatenated_df, new_id_to_accent)
 
-    class_weights = calculate_class_weights(train_df, new_number_accents, new_id_to_accent)
+    class_weights_new = calculate_class_weights(train_df_new_only, new_number_accents, new_id_to_accent)
 
     model = train_model(
         model=model,
-        train_loader=train_loader,
-        test_loader=test_loader,
+        train_loader=train_loader_new_only,
+        test_loader=test_loader_new_only,
         optimizer=optimizer,
-        class_weights=class_weights,
+        class_weights=class_weights_new,
         device=DEVICE,
         number_epochs=2,
         run_name="add corp20 to training set"
     )
 
+    model = setup_model('best_model.pt', new_number_accents)
+
     with open('results.txt', 'a') as f:
         f.write(f"ADD CORP20 TO TRAINING SET\n")
         f.write(f"mapping: {new_id_to_accent}\n")
         f.write(f"number of accents: {new_number_accents}\n")
+
+    #final eval
+    avg_loss, accuracy = evaluate(model, test_loader, class_weights_new, DEVICE, save_model=False)
+    with open('results.txt', 'a') as f:
+        f.write(f"FINAL EVALUATION on new weights\n")
+        f.write(f"Accuracy: {accuracy:.4f}\n")
     
 
     api = HfApi()
