@@ -62,17 +62,17 @@ def add_new_accents(model, number_existing_accents, existing_mapping, accent_nam
     model.base_model.model.accent_classifier = torch.nn.Linear(model.dims.n_text_state, new_number_accents)
 
     # Freeze all layers except the classifier
-    for param in model.parameters():
-        param.requires_grad = False
+    # for param in model.parameters():
+    #     param.requires_grad = False
     
-    # Unfreeze the classifier layer
-    for param in model.base_model.model.accent_classifier.parameters():
-        param.requires_grad = True
+    # # Unfreeze the classifier layer
+    # for param in model.base_model.model.accent_classifier.parameters():
+    #     param.requires_grad = True
     
 
-    # Initialize new weights for the new classes
-    torch.nn.init.xavier_uniform_(model.accent_classifier.weight[number_existing_accents:, :])
-    torch.nn.init.zeros_(model.accent_classifier.bias[number_existing_accents:])
+    # # Initialize new weights for the new classes
+    # torch.nn.init.xavier_uniform_(model.accent_classifier.weight[number_existing_accents:, :])
+    # torch.nn.init.zeros_(model.accent_classifier.bias[number_existing_accents:])
 
     # Define optimizer with different learning rates (optional)
     # optimizer = torch.optim.Adam([
@@ -124,23 +124,26 @@ def main():
 
     new_dataset = load_new_dataset(['Amirjab21/commonvoice'])
 
-    concatenated_df = pd.concat([dataset_df, new_dataset], ignore_index=True)
+    subsample_of_old_data = dataset_df.sample(n=5000)
+
+    concatenated_df = pd.concat([subsample_of_old_data, new_dataset], ignore_index=True)
 
     #First, well try to just use the new data to see if training this alone can help.
     #If this doesnt work, you have to prepare_data with the concatented df above.
-    train_loader_new_only, test_loader_new_only, train_df_new_only = prepare_data(new_dataset, new_id_to_accent)
-    train_loader_both, test_loader_both, train_df_both = prepare_data(concatenated_df, new_id_to_accent)
+    train_loader, test_loader, train_df = prepare_data(concatenated_df, new_id_to_accent)
+    # train_loader_both, test_loader_both, train_df_both = prepare_data(concatenated_df, new_id_to_accent)
 
-    class_weights_new = calculate_class_weights(train_df_new_only, new_number_accents, new_id_to_accent)
-
+    class_weights_new = calculate_class_weights(train_df, new_number_accents, new_id_to_accent)
+    
+    model.to(DEVICE)
     model = train_model(
         model=model,
-        train_loader=train_loader_new_only,
-        test_loader=test_loader_new_only,
+        train_loader=train_loader,
+        test_loader=test_loader,
         optimizer=optimizer,
         class_weights=class_weights_new,
         device=DEVICE,
-        number_epochs=2,
+        number_epochs=1,
         run_name="add corp20 to training set"
     )
 
@@ -152,7 +155,7 @@ def main():
         f.write(f"number of accents: {new_number_accents}\n")
 
     #final eval
-    avg_loss, accuracy = evaluate(model, test_loader_both, class_weights_new, DEVICE, save_model=False)
+    avg_loss, accuracy = evaluate(model, test_loader, class_weights_new, DEVICE, save_model=False)
     with open('results.txt', 'a') as f:
         f.write(f"FINAL EVALUATION on new weights\n")
         f.write(f"Accuracy: {accuracy:.4f}\n")

@@ -113,8 +113,12 @@ def main():
         'Indian English': 'Indian',
         "Japanese English": "Japanese",
         "Japan English": "Japanese",
-        "German English": "German"
+        "German English": "German",
+        "Filipino": "Filipino",
+        "Korean": "Korean"
     }
+
+    accents = ['Scottish', 'NewZealandEnglish', 'Japanese', 'Canadian', 'AustralianEnglish', 'Irish', 'American', 'SouthAfrican', 'Indian', 'English', 'German', 'Filipino', 'Korean']
 
     df = create_accent_dataframe_and_resample(tsv_file, audio_dir)
     df = preprocess_df(df, relevant_accent_list, accent_mapping)

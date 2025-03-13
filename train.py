@@ -62,7 +62,7 @@ def load_datasets(sample_size=None):
     return both_datasets
 
 def prepare_data(dataset_df,ID_TO_ACCENT, batch_size=16):
-    train_size = int(0.95 * len(dataset_df))
+    train_size = int(0.98 * len(dataset_df))
     test_size = len(dataset_df) - train_size
     
     train_df, test_df = torch.utils.data.random_split(dataset_df, [train_size, test_size])
