@@ -107,9 +107,9 @@ def calculate_class_weights(train_df, NUM_ACCENT_CLASSES, ID_TO_ACCENT):
     
     return class_weights.to(DEVICE)
 
-def setup_model(checkpoint_file = None):
+def setup_model(checkpoint_file = None, num_accent_classes=NUM_ACCENT_CLASSES):
     base_whisper_model = load_model(MODEL_VARIANT, device=DEVICE)
-    model = ModifiedWhisper(base_whisper_model.dims, NUM_ACCENT_CLASSES, base_whisper_model)
+    model = ModifiedWhisper(base_whisper_model.dims, num_accent_classes, base_whisper_model)
     
     peft_config = LoraConfig(
         inference_mode=False,
