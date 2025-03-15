@@ -105,26 +105,29 @@ def load_new_dataset(dataset_names):
 def main():
     # Load and prepare data
     dataset_df = load_datasets(sample_size=100)
-    train_loader, test_loader, train_df = prepare_data(dataset_df, ID_TO_ACCENT)
-    class_weights = calculate_class_weights(train_df, NUM_ACCENT_CLASSES, ID_TO_ACCENT)
+    # train_loader, test_loader, train_df = prepare_data(dataset_df, ID_TO_ACCENT)
+    # class_weights = calculate_class_weights(train_df, NUM_ACCENT_CLASSES, ID_TO_ACCENT)
     
     # Setup model and optimizer
     model = setup_model(checkpoint_path)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-    avg_loss, accuracy = evaluate(model, test_loader, class_weights, DEVICE, save_model=False)
 
-    with open('results.txt', 'a') as f:
-        f.write(f"INITIAL EVALUATION on existing weights\n")
-        f.write(f"Accuracy: {accuracy:.4f}\n")
-
-    new_accents = ['Scottish', 'NewZealandEnglish', 'Japanese', 'Canadian', 'AustralianEnglish', 'Irish', 'American', 'SouthAfrican', 'Indian', 'English', 'German', 'Filipino', 'Korean']
+    
+    new_accents = ['Scottish', 'American', 'SouthAfrican', 'Indian', 'China',
+       'Canadian', 'English', 'Singapore', 'AustralianEnglish',
+       'Philippines', 'Welsh', 'Germany', 'West Indies and Bermuda',
+       'Irish', 'Greece', 'Israel', 'Ukraine', 'Malaysia', 'Brazil',
+       'Hong Kong', 'NewZealandEnglish', 'Turkey', 'Poland', 'Thailand',
+       'Sweden', 'Nepal', 'Netherlands', 'Kenya', 'Bangladesh', 'Russia',
+       'Finland', 'Italy', 'France', 'Hungary', 'Austria', 'Spain',
+       'Nigeria', 'Czech Republic', 'Indonesia']
     model, new_id_to_accent, new_number_accents = add_new_accents(model, NUM_ACCENT_CLASSES, ID_TO_ACCENT, new_accents)
 
 
     new_dataset = load_new_dataset(['Amirjab21/commonvoice'])
 
-    subsample_of_old_data = dataset_df.sample(n=5000)
+    subsample_of_old_data = dataset_df
 
     concatenated_df = pd.concat([subsample_of_old_data, new_dataset], ignore_index=True)
 
@@ -143,14 +146,14 @@ def main():
         optimizer=optimizer,
         class_weights=class_weights_new,
         device=DEVICE,
-        number_epochs=1,
-        run_name="add corp20 to training set"
+        number_epochs=3,
+        run_name="add 39 accents to training set"
     )
 
     # model = setup_model('best_model.pt', new_number_accents)
 
     with open('results.txt', 'a') as f:
-        f.write(f"ADD CORP20 TO TRAINING SET\n")
+        f.write(f"ADD 39 ACCENTS TO TRAINING SET\n")
         f.write(f"mapping: {new_id_to_accent}\n")
         f.write(f"number of accents: {new_number_accents}\n")
 
