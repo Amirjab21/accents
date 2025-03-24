@@ -10,13 +10,13 @@ from training.accent_dataset import ContrastiveDataset
 from training.train_utils import train_model
 from pathlib import Path
 from training.train_utils import evaluate
-from train import load_datasets, prepare_data, calculate_class_weights, setup_model
+from train import load_datasets
 from huggingface_hub import HfApi
 import os
 from datetime import datetime
 from huggingface_hub import hf_hub_download
 import datasets
-datasets.disable_caching()
+# datasets.disable_caching()
 
 # export HF_TOKEN=hf_token
 #wandb login prior to script
@@ -24,12 +24,58 @@ datasets.disable_caching()
 hf_token = os.getenv("HF_TOKEN")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_VARIANT = "small"
-NUM_ACCENT_CLASSES = 11
-ID_TO_ACCENT = {
-    0: "Scottish", 1: "English", 2: "Indian", 3: "Irish", 4: "Welsh",
-    5: "NewZealandEnglish", 6: "AustralianEnglish", 7: "SouthAfrican",
-    8: "Canadian", 9: "NorthernIrish", 10: "American"
-}
+# NUM_ACCENT_CLASSES = 11
+# ID_TO_ACCENT = {
+#     0: "Scottish", 1: "English", 2: "Indian", 3: "Irish", 4: "Welsh",
+#     5: "NewZealandEnglish", 6: "AustralianEnglish", 7: "SouthAfrican",
+#     8: "Canadian", 9: "NorthernIrish", 10: "American"
+# }
+
+def prepare_data(dataset_df,ID_TO_ACCENT, batch_size=16):
+    train_size = int(0.98 * len(dataset_df))
+    test_size = len(dataset_df) - train_size
+    
+    train_df, test_df = torch.utils.data.random_split(dataset_df, [train_size, test_size])
+    train_df = train_df.dataset
+    test_df = test_df.dataset
+    
+    # Create datasets
+    train_dataset = ContrastiveDataset(train_df, ID_TO_ACCENT, device=DEVICE)
+    test_dataset = ContrastiveDataset(test_df, ID_TO_ACCENT, device=DEVICE)
+    
+    # Create dataloaders
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True,
+        num_workers=6 if torch.cuda.is_available() else 0, 
+        pin_memory=True
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=True,
+        num_workers=6 if torch.cuda.is_available() else 0, 
+        pin_memory=True
+    )
+    
+    return train_loader, test_loader, train_df
+
+def calculate_class_weights(train_df, NUM_ACCENT_CLASSES, ID_TO_ACCENT):
+    class_counts = {i: 0 for i in range(NUM_ACCENT_CLASSES)}
+    dialect_to_id = {v: k for k, v in ID_TO_ACCENT.items()}
+    for dialect in train_df['dialect']:
+        
+        dialect_id = dialect_to_id[dialect]
+        class_counts[dialect_id] += 1
+
+    total_samples = len(train_df)
+    class_weights = torch.FloatTensor([
+        total_samples / (NUM_ACCENT_CLASSES * count) if count > 0 else 0.0 
+        for count in [class_counts[i] for i in range(NUM_ACCENT_CLASSES)]
+    ])
+    
+    return class_weights.to(DEVICE)
 
 
 # hf_filename = "model_11_accents_epoch_2.pt"
@@ -514,6 +560,8 @@ def filter_out_accents(df, min_samples=100):
     print(filtered_df['region'].unique(), 'remaining dialects')
     print("\nDialects filtered out (fewer than {min_samples} samples):")
     print(value_counts[value_counts < min_samples].sort_index())
+    filtered_df.drop(columns=['dialect'], inplace=True)
+    filtered_df = filtered_df.rename(columns={'region': 'dialect'})
     
     return filtered_df
 
@@ -522,7 +570,7 @@ def load_and_process_commonvoice():
 
     new_dataset, unique_accents = load_new_dataset(['Amirjab21/commonvoice'])
     grouped_dataset, dialect_to_region, unique_regions = group_accents(new_dataset)
-    unique_accents = new_dataset['dialect'].value_counts()
+    unique_accents = grouped_dataset['dialect'].value_counts()
     filtered_dataset = filter_out_accents(grouped_dataset)
 
     dialects_to_limit = ["American", "SouthAfrican", "English", "Scottish", "Canadian", "Philippines"]
@@ -542,12 +590,29 @@ def load_and_process_commonvoice():
     return filtered_dataset, unique_accents
 
 
+def limit_accents(df, accents_to_limit, max_samples=10000):
+
+    for dialect in accents_to_limit:
+        dialect_samples = df[df['dialect'] == dialect]
+        if len(dialect_samples) > max_samples:
+            print(f"Limiting {dialect} from {len(dialect_samples)} to {max_samples} samples")
+            # Get indices of samples to keep (random selection)
+            keep_indices = dialect_samples.sample(n=max_samples, random_state=42).index
+            # Get indices to drop
+            drop_indices = dialect_samples.index.difference(keep_indices)
+            # Drop the excess samples
+            df = df.drop(index=drop_indices)
+
+    return df
+
+
 def main():
 
 
     dataset_df = load_datasets(sample_size=100)
     accent_counts = dataset_df['dialect'].value_counts()
     print(accent_counts, 'accent counts of commonvoice dataset')
+    dataset_df = limit_accents(dataset_df, accents_to_limit=["English"])
     new_dataset, unique_accents = load_and_process_commonvoice()
     
 
@@ -562,31 +627,33 @@ def main():
 
 
 
-    dialects_to_limit = ["American", "SouthAfrican", "English", "Scottish", "Canadian", "Philippines"]
-    MAX_SAMPLES = 10000
-    
-    for dialect in dialects_to_limit:
-        dialect_samples = concatenated_df[concatenated_df['dialect'] == dialect]
-        if len(dialect_samples) > MAX_SAMPLES:
-            print(f"Limiting {dialect} from {len(dialect_samples)} to {MAX_SAMPLES} samples")
-            # Get indices of samples to keep (random selection)
-            keep_indices = dialect_samples.sample(n=MAX_SAMPLES, random_state=42).index
-            # Get indices to drop
-            drop_indices = dialect_samples.index.difference(keep_indices)
-            # Drop the excess samples
-            concatenated_df = concatenated_df.drop(index=drop_indices)
 
-    all_accents = concatenated_df['dialect'].value_counts()
-    print(all_accents, "all accents after all reductions")
+    # dialects_to_limit = ["American", "SouthAfrican", "English", "Scottish", "Canadian", "Philippines"]
+    # MAX_SAMPLES = 10000
+    
+    # for dialect in dialects_to_limit:
+    #     dialect_samples = concatenated_df[concatenated_df['dialect'] == dialect]
+    #     if len(dialect_samples) > MAX_SAMPLES:
+    #         print(f"Limiting {dialect} from {len(dialect_samples)} to {MAX_SAMPLES} samples")
+    #         # Get indices of samples to keep (random selection)
+    #         keep_indices = dialect_samples.sample(n=MAX_SAMPLES, random_state=42).index
+    #         # Get indices to drop
+    #         drop_indices = dialect_samples.index.difference(keep_indices)
+    #         # Drop the excess samples
+    #         concatenated_df = concatenated_df.drop(index=drop_indices)
+
+    # all_accents = concatenated_df['dialect'].value_counts()
+    # print(all_accents, "all accents after all reductions")
 
     if DEVICE != 'cuda':
         concatenated_df = concatenated_df.sample(n=100)
 
     id_to_accent = {i: accent for i, accent in enumerate(concatenated_df['dialect'].unique())}
+    print(id_to_accent, 'id to accent')
+    print(len(id_to_accent), 'number of accents')
 
         
     train_loader, test_loader, train_df = prepare_data(concatenated_df, id_to_accent)
-    # train_loader_both, test_loader_both, train_df_both = prepare_data(concatenated_df, new_id_to_accent)
 
     class_weights_new = calculate_class_weights(train_df, number_of_accents, id_to_accent)
 
@@ -616,7 +683,6 @@ def main():
         run_name="add new accents to training set"
     )
 
-    # model = setup_model('best_model.pt', new_number_accents)
     
 
     #final eval

@@ -37,11 +37,7 @@ GitPython==3.1.44
 huggingface-hub==0.29.1
 idna==3.10
 importlib_resources==6.5.2
-ipdb==0.13.13
-ipykernel==6.29.5
-ipython==9.0.1
-ipython_pygments_lexers==1.1.1
-ipywidgets==8.1.5
+
 isodate==0.7.2
 jedi==0.19.2
 Jinja2==3.1.5
@@ -128,7 +124,7 @@ torchaudio==2.6.0
 tornado==6.4.2
 tqdm==4.67.1
 traitlets==5.14.3
-transformers==4.37.2
+transformers==4.49.0
 types-pytz==2025.1.0.20250204
 typing_extensions==4.12.2
 tzdata==2025.1

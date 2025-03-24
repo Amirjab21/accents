@@ -19,9 +19,9 @@ def evaluate(model, dataloader, class_weights, device, save_model=True):
     with torch.no_grad():
         for batch_idx, batch in enumerate(progress_bar):
             mel = batch['mel'].to(device)
-            text = batch['text'].to(device)
+            # text = batch['text'].to(device)
             target = batch['target'].to(device)
-            output = model(mel, text)
+            output = model(mel)
             batch_loss = criterion(output, target)
             total_loss += batch_loss.item()
             progress_bar.set_postfix({"loss": batch_loss.item()})
@@ -61,11 +61,11 @@ def train_model(model, train_loader, test_loader, optimizer, class_weights,
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{number_epochs}")
         
         for batch_idx, batch in enumerate(progress_bar):
-            optimizer.zero_grad()
+            optimizer.zero_grad() 
             mel = batch['mel'].to(device)
-            text = batch['text'].to(device)
+            # text = batch['text'].to(device)
             target = batch['target'].to(device)
-            output = model(mel, text)
+            output = model(mel)
             batch_loss = criterion(output, target)
 
             progress_bar.set_postfix({"loss": batch_loss.item()})
