@@ -1,9 +1,15 @@
 import torch
 from tqdm import tqdm
 import wandb
-
+from datetime import datetime
+from huggingface_hub import HfApi
+import os
+hf_token = os.getenv("HF_TOKEN")
 def evaluate(model, dataloader, class_weights, device, save_model=True):
     model.eval()
+    api = HfApi()
+    print(hf_token)
+    
     total_loss = 0
     best_loss = float('inf')
     correct = 0
@@ -29,6 +35,16 @@ def evaluate(model, dataloader, class_weights, device, save_model=True):
     if avg_loss < best_loss and save_model == True:
         best_loss = avg_loss
         torch.save(model.state_dict(), 'best_model.pt')
+        if device == "cuda":
+            try:
+                api.upload_file(
+                    path_or_fileobj="best_model.pt",
+                    path_in_repo=f"best_model_{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.pt",
+                    repo_id="Amirjab21/accent-classifier",
+                    token=hf_token  # Replace with your actual token
+                )
+            except Exception as e:
+                print(f"Error uploading model: {e}")
     
     model.train()
     return avg_loss, accuracy

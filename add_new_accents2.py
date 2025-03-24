@@ -32,13 +32,38 @@ ID_TO_ACCENT = {
 }
 
 
-hf_filename = "model_11_accents_epoch_2.pt"
-checkpoint_path = hf_hub_download(
-    repo_id="Amirjab21/accent-classifier",
-    filename=hf_filename,
-    token=hf_token
-)
+# hf_filename = "model_11_accents_epoch_2.pt"
+# checkpoint_path = hf_hub_download(
+#     repo_id="Amirjab21/accent-classifier",
+#     filename=hf_filename,
+#     token=hf_token
+# )
 
+def setup_model(checkpoint_file=None, num_accent_classes=None):
+    base_whisper_model = load_model(MODEL_VARIANT, device=DEVICE)
+    model = ModifiedWhisper(base_whisper_model.dims, num_accent_classes, base_whisper_model)
+    
+    peft_config = LoraConfig(
+        inference_mode=False,
+        r=8,
+        target_modules=["out", "token_embedding", "query", "key", "value", "proj_out"],
+        lora_alpha=32,
+        lora_dropout=0.1
+    )
+    model = get_peft_model(model, peft_config)
+    if checkpoint_file:
+        checkpoint_path = str(Path(__file__).parent / checkpoint_file)
+        checkpoint = torch.load(checkpoint_path, map_location=torch.device(DEVICE))
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint)
+            print('Model loaded successfully')
+    model.print_trainable_parameters()
+    
+    model.to(DEVICE)
+    
+    return model
 
 def add_new_accents(model, number_existing_accents, existing_mapping, accent_names):
     
@@ -258,6 +283,11 @@ def do_mapping(df):
         
         # France
         "French": "France",
+        "french accent": "France",
+        "light french accent": "France",
+        "not native English, originally French native language": "France",
+        "french english": "France",
+        "non native French speaker": "France",
 
         # Spain
         "spanish english": "Spain",
@@ -270,6 +300,8 @@ def do_mapping(df):
         
         # Italy
         "Italian": "Italy",
+        "Italian,United States English": "Italy",
+        "Italian accent from Northern Italy (Milan)": "Italy",
         
         # Netherlands
         "Dutch": "Netherlands",
@@ -334,10 +366,37 @@ def do_mapping(df):
         # Brazil
         "Brazilian": "Brazil",
         "Brazillian Accent": "Brazil",
+        "Brazilian English": "Brazil",
+        "Brazilian portuguese native speaker": "Brazil",
+        "Brazilian Accent,slight british accent": "Brazil",
+        "portuguese": "Brazil",
+        "United States English,portuguese": "Brazil",
+        "I'm from Brazil,  my Native language is portuguese": "Brazil",
+        "colombian": "Brazil",
+
+
+
         
         # Mexico/Central America
         "Central American, United States English": "Mexico/Central America",
-        "little latino, United States English, second language": "Mexico/Central America",
+        "Mexican English": "Mexico/Central America",
+        "Mexican": "Mexico/Central America",
+        "Latino English (Mexico)": "Mexico/Central America",
+        "Hispanic": "Mexico/Central America",
+        "I am Hispanic": "Mexico/Central America",
+        "Hispanic/Latino": "Mexico/Central America",
+        "little latino,United States English,second language": "Mexico/Central America",
+        "Latino": "Mexico/Central America",
+        "Latin American accent": "Mexico/Central America",
+        "Latin American accent influenced by American English": "Mexico/Central America",
+
+        
+        # Kazakhstan
+        "Kazakhstan English": "Kazakhstan",
+        
+        # Latvia
+        "strong Latvian accent": "Latvia",
+        "Latvian": "Latvia",
         
         # Kazakhstan
         "Kazakhstan English": "Kazakhstan",
@@ -358,46 +417,150 @@ def do_mapping(df):
     return df, unique_accents
 
 
+def group_accents(df):
+    # Group accents by Region
+    region_mapping = {
+        # East Asia
+        "Japan": "East Asia",
+        "South Korea": "East Asia",
+        "Hong Kong": "East Asia",
+        "China": "East Asia",
+        
+        # South East Asia
+        "Indonesia": "South East Asia",
+        "Malaysia": "South East Asia",
+        "Thailand": "South East Asia",
+        "Vietnam": "South East Asia",
+        "Singapore": "South East Asia",
+        "Philippines": "South East Asia",
+        
+        # Eastern Europe
+        "Russia": "Eastern Europe",
+        "Hungary": "Eastern Europe",
+        "Poland": "Eastern Europe",
+        "Austria": "Eastern Europe",
+        "Slovakia": "Eastern Europe",
+        "Greece": "Eastern Europe",
+        "Ukraine": "Eastern Europe",
+        "Czech Republic": "Eastern Europe",
+        "Turkey": "Eastern Europe",
+        "Bulgaria": "Eastern Europe",
+        "Romania": "Eastern Europe",
+        "Croatia": "Eastern Europe",
+        "Latvia": "Eastern Europe",
+        
+        # Nordic
+        "Sweden": "Nordic",
+        "Finland": "Nordic",
+        "Norway": "Nordic",
+        "Denmark": "Nordic",
+        "Netherlands": "Nordic",
+        
+        # Southern Europe
+        "Spain": "Southern Europe",
+        "Italy": "Southern Europe",
+        
+        # Western Africa
+        "Ghana": "Western Africa",
+        "Nigeria": "Western Africa",
+        
+        # East Africa
+        "Kenya": "East Africa",
+        "East Africa": "East Africa",
 
+        "Nepal": "South Asia",
+        "Bangladesh": "South Asia",
+        
+    }
+    
+    # Apply the mapping to the dialect column
+    df['region'] = df['dialect'].map(region_mapping)
+    
+    # For accents that don't have a region mapping, keep the original dialect
+    df['region'] = df['region'].fillna(df['dialect'])
+    
+    # Create a new mapping from original dialects to their regions
+    dialect_to_region = df[['dialect', 'region']].drop_duplicates().set_index('dialect')['region'].to_dict()
+    
+    # Get unique regions
+    unique_regions = df['region'].unique().tolist()
+    
+    return df, dialect_to_region, unique_regions
+    
+    
+def filter_out_accents(df, min_samples=100):
+    """
+    Filter out accents that have fewer than min_samples samples.
+    
+    Args:
+        df: DataFrame containing the accent data
+        min_samples: Minimum number of samples required to keep an accent (default: 100)
+    
+    Returns:
+        Filtered DataFrame with only accents that have at least min_samples samples
+    """
+    value_counts = df['region'].value_counts()
+    print(value_counts, 'value counts')
+    
+    # Get accents with at least min_samples samples
+    valid_accents = value_counts[value_counts >= min_samples].index.tolist()
+    
+    # Filter the DataFrame to keep only rows with valid accents
+    filtered_df = df[df['region'].isin(valid_accents)]
+    
+    print(f"Original dataset had {len(df)} samples across {len(value_counts)} accents")
+    print(f"Filtered dataset has {len(filtered_df)} samples across {len(valid_accents)} accents")
+
+    print(filtered_df['region'].unique(), 'remaining dialects')
+    print("\nDialects filtered out (fewer than {min_samples} samples):")
+    print(value_counts[value_counts < min_samples].sort_index())
+    
+    return filtered_df
+
+
+def load_and_process_commonvoice():
+
+    new_dataset, unique_accents = load_new_dataset(['Amirjab21/commonvoice'])
+    grouped_dataset, dialect_to_region, unique_regions = group_accents(new_dataset)
+    unique_accents = new_dataset['dialect'].value_counts()
+    filtered_dataset = filter_out_accents(grouped_dataset)
+
+    dialects_to_limit = ["American", "SouthAfrican", "English", "Scottish", "Canadian", "Philippines"]
+    MAX_SAMPLES = 10000
+    
+    for dialect in dialects_to_limit:
+        dialect_samples = filtered_dataset[filtered_dataset['dialect'] == dialect]
+        if len(dialect_samples) > MAX_SAMPLES:
+            print(f"Limiting {dialect} from {len(dialect_samples)} to {MAX_SAMPLES} samples")
+            # Get indices of samples to keep (random selection)
+            keep_indices = dialect_samples.sample(n=MAX_SAMPLES, random_state=42).index
+            # Get indices to drop
+            drop_indices = dialect_samples.index.difference(keep_indices)
+            # Drop the excess samples
+            filtered_dataset = filtered_dataset.drop(index=drop_indices)
+    
+    return filtered_dataset, unique_accents
 
 
 def main():
 
 
-    # Load and prepare data
-    new_dataset, unique_accents = load_new_dataset(['Amirjab21/commonvoice'])
-    # print(len(new_dataset), 'length of new dataset')
-    # columns = new_dataset.columns
-    # print(columns, 'columns')
-    # unique_accents = new_dataset['dialect'].value_counts()
-    # print(unique_accents, 'unique accents')
     dataset_df = load_datasets(sample_size=100)
-    # train_loader, test_loader, train_df = prepare_data(dataset_df, ID_TO_ACCENT)
-    # class_weights = calculate_class_weights(train_df, NUM_ACCENT_CLASSES, ID_TO_ACCENT)
+    accent_counts = dataset_df['dialect'].value_counts()
+    print(accent_counts, 'accent counts of commonvoice dataset')
+    new_dataset, unique_accents = load_and_process_commonvoice()
     
-    # Setup model and optimizer
-    model = setup_model(checkpoint_path)
+
+    concatenated_df = pd.concat([dataset_df, new_dataset], ignore_index=True)
+    print("accent counts after concat", concatenated_df['dialect'].value_counts())
+    number_of_accents = len(concatenated_df['dialect'].unique())
+
+
+
+    model = setup_model(checkpoint_file=None, num_accent_classes=number_of_accents)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 
-    
-    # new_accents = ['Scottish', 'American', 'SouthAfrican', 'Indian', 'China',
-    #    'Canadian', 'English', 'Singapore', 'AustralianEnglish',
-    #    'Philippines', 'Welsh', 'Germany', 'West Indies and Bermuda',
-    #    'Irish', 'Greece', 'Israel', 'Ukraine', 'Malaysia', 'Brazil',
-    #    'Hong Kong', 'NewZealandEnglish', 'Turkey', 'Poland', 'Thailand',
-    #    'Sweden', 'Nepal', 'Netherlands', 'Kenya', 'Bangladesh', 'Russia',
-    #    'Finland', 'Italy', 'France', 'Hungary', 'Austria', 'Spain',
-    #    'Nigeria', 'Czech Republic', 'Indonesia', 'South']
-    model, new_id_to_accent, new_number_accents = add_new_accents(model, NUM_ACCENT_CLASSES, ID_TO_ACCENT, unique_accents)
-
-
-    # new_dataset = load_new_dataset(['Amirjab21/commonvoice'])
-
-    subsample_of_old_data = dataset_df
-
-    concatenated_df = pd.concat([subsample_of_old_data, new_dataset], ignore_index=True)
-    print(len(concatenated_df), 'length of concatenated df')
 
     dialects_to_limit = ["American", "SouthAfrican", "English", "Scottish", "Canadian", "Philippines"]
     MAX_SAMPLES = 10000
@@ -414,22 +577,23 @@ def main():
             concatenated_df = concatenated_df.drop(index=drop_indices)
 
     all_accents = concatenated_df['dialect'].value_counts()
-    print(all_accents, "all accents")
-    #First, well try to just use the new data to see if training this alone can help.
-    #If this doesnt work, you have to prepare_data with the concatented df above.
+    print(all_accents, "all accents after all reductions")
+
     if DEVICE != 'cuda':
         concatenated_df = concatenated_df.sample(n=100)
 
+    id_to_accent = {i: accent for i, accent in enumerate(concatenated_df['dialect'].unique())}
+
         
-    train_loader, test_loader, train_df = prepare_data(concatenated_df, new_id_to_accent)
+    train_loader, test_loader, train_df = prepare_data(concatenated_df, id_to_accent)
     # train_loader_both, test_loader_both, train_df_both = prepare_data(concatenated_df, new_id_to_accent)
 
-    class_weights_new = calculate_class_weights(train_df, new_number_accents, new_id_to_accent)
+    class_weights_new = calculate_class_weights(train_df, number_of_accents, id_to_accent)
 
     with open('results.txt', 'a') as f:
-        f.write(f"ADD 39 ACCENTS TO TRAINING SET\n")
-        f.write(f"mapping: {new_id_to_accent}\n")
-        f.write(f"number of accents: {new_number_accents}\n")
+        f.write(f"ADD new accents to training set\n")
+        f.write(f"mapping: {id_to_accent}\n")
+        f.write(f"number of accents: {number_of_accents}\n")
     api = HfApi()
     api.upload_file(
             path_or_fileobj="results.txt",
@@ -449,7 +613,7 @@ def main():
         class_weights=class_weights_new,
         device=DEVICE,
         number_epochs=3,
-        run_name="add 39 accents to training set"
+        run_name="add new accents to training set"
     )
 
     # model = setup_model('best_model.pt', new_number_accents)
@@ -466,12 +630,12 @@ def main():
 
     # Upload the model file
     if DEVICE == "cuda":
-        api.upload_file(
-            path_or_fileobj="best_model.pt",
-            path_in_repo=f"best_model_{datetime.now().strftime('%Y-%m-%d')}.pt",
-            repo_id="Amirjab21/accent-classifier",
-            token=hf_token  # Replace with your actual token
-        )
+        # api.upload_file(
+        #     path_or_fileobj="best_model.pt",
+        #     path_in_repo=f"best_model_{datetime.now().strftime('%Y-%m-%d')}.pt",
+        #     repo_id="Amirjab21/accent-classifier",
+        #     token=hf_token  # Replace with your actual token
+        # )
         api.upload_file(
             path_or_fileobj="results.txt",
             path_in_repo=f"results/results_{datetime.now().strftime('%Y-%m-%d')}.txt",
