@@ -156,17 +156,27 @@ class Dataset(torch.utils.data.Dataset):
         sample_rate, audio_array = bytes_to_array(audio)
         text = data['text']
 
+        # Check for NaN or invalid values in audio_array
+        # if np.isnan(audio_array).any() or np.isinf(audio_array).any():
+        #     print(f"Warning: Found NaN or Inf in audio_array at index {idx}")
+        #     # Replace with zeros or small values
+        #     audio_array = np.nan_to_num(audio_array, nan=0.0, posinf=1.0, neginf=-1.0)
         
-        input_values = self.processor.feature_extractor(audio_array, sampling_rate=sample_rate, return_tensors="pt", truncation=True,padding="max_length", max_length=200)
+        # # Ensure audio is not empty and has reasonable values
+        # if len(audio_array) == 0 or np.max(np.abs(audio_array)) < 1e-6:
+        #     print(f"Warning: Very small or empty audio at index {idx}")
+        
+        input_values = self.processor.feature_extractor(audio_array, sampling_rate=sample_rate, return_tensors="pt", truncation=True, padding="max_length", max_length=200)
         audio_mel = input_values.input_features
-        print(audio_mel.shape, 'audio mel')
         
-        text = self.tokenizer(text, return_tensors="pt", padding="max_length", truncation=True, max_length=100)
-        labels = text.input_ids
-        labels = labels.masked_fill(text.attention_mask.eq(0), -100)
-            
+        # Normalize text to ensure it's clean
+        text = text.strip().lower()
         
-        return  {
+        text_tokens = self.tokenizer(text, return_tensors="pt", padding="max_length", truncation=True, max_length=50)
+        labels = text_tokens.input_ids
+        labels = labels.masked_fill(text_tokens.attention_mask.eq(0), -100)
+        
+        return {
             'mel': audio_mel.squeeze(0), 
             'labels': labels.squeeze(0), 
             'text': data['text']
@@ -240,7 +250,8 @@ def train_model(model, train_loader, test_loader, optimizer,
     if device == "cuda":
         wandb.init(project="finetune-wav2vec-scottish", name=run_name)
     model.train()
-    
+    model = model.to(device)  # Ensure model is on the correct device
+    criterion = torch.nn.CrossEntropyLoss()
     
     for epoch in range(number_epochs):
         total_loss = 0
@@ -250,19 +261,55 @@ def train_model(model, train_loader, test_loader, optimizer,
             optimizer.zero_grad()
             mel = batch['mel'].to(device)
             labels = batch['labels'].to(device)
-            import ipdb
-            ipdb.set_trace()
-            print(mel[0], 'mel')
-            print(labels[0], 'labels')
-            # text = text.to(device)
-            output = model(mel, labels)
+            
+            # Debug info - check for NaN values
+            if torch.isnan(mel).any():
+                print("Warning: NaN values in mel input")
+                continue  # Skip this batch
+                
+            # Check shapes before forward pass
+            print(f"Mel shape: {mel.shape}, Labels shape: {labels.shape}")
+            print(mel, 'mel')
+            print(labels, 'labels')
+            
+            # Forward pass with gradient clipping
+            output = model(mel, labels=labels)
             print(output, 'output')
+            outputlogits = output.logits
+            print(outputlogits.shape, 'outputlogits')
+            predicted_ids = torch.argmax(outputlogits, dim=-1)
+            print(predicted_ids, 'predicted_ids')
             batch_loss = output.loss
-
+            print(f"CTC loss: {batch_loss.item()}")
+            
+            # If CTC loss is always 0, we can try to calculate cross entropy loss manually
+            # But we need to reshape the logits and labels correctly
+            if batch_loss.item() == 0 or torch.isnan(batch_loss).any():
+                print("CTC loss is 0, calculating cross entropy loss manually")
+                # Reshape logits to [batch_size * sequence_length, vocab_size]
+                logits_reshaped = outputlogits.view(-1, outputlogits.size(-1))
+                # Reshape labels to [batch_size * sequence_length]
+                labels_reshaped = labels.view(-1)
+                # Only consider non-padded positions (-100 is the padding index)
+                mask = labels_reshaped != -100
+                if mask.sum() > 0:  # Only calculate loss if we have valid positions
+                    logits_filtered = logits_reshaped[mask]
+                    labels_filtered = labels_reshaped[mask]
+                    batch_loss = criterion(logits_filtered, labels_filtered)
+                    print(f"Manual loss: {batch_loss.item()}")
+            
+            # Check if loss is valid
+            if batch_loss is None or torch.isnan(batch_loss).any():
+                print("Warning: NaN loss encountered, skipping batch")
+                continue
+                
             progress_bar.set_postfix({"loss": batch_loss.item()})
             
             batch_loss.backward()
+            # Add gradient clipping to prevent exploding gradients
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+            
             if device == "cuda":
                 wandb.log({"batch loss": batch_loss.item()})
             total_loss += batch_loss.item()
@@ -280,7 +327,7 @@ def train_model(model, train_loader, test_loader, optimizer,
 def main():
 
     dataset_hf = load_datasets()
-    batch_size=1
+    batch_size=16
     train_size = int(0.95 * len(dataset_hf))  # 5% for training
     test_size = len(dataset_hf) - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(dataset_hf, [train_size, test_size])
