@@ -8,7 +8,7 @@ class ModifiedWhisper(torch.nn.Module):
         self.whisper = whisper
         self.accent_classifier = torch.nn.Linear(self.dims.n_text_state, num_accent_classes)
     
-    def forward(self, mel: torch.Tensor, tokens: torch.Tensor):
+    def forward(self, mel: torch.Tensor):
         encoder_output = self.whisper.encoder(mel)
         #in the future, we could calculate a score for every timestep
         pooled_output = torch.mean(encoder_output, dim=1)

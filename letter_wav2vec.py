@@ -11,8 +11,11 @@ from scipy.io import wavfile
 import librosa
 import numpy as np
 import ipdb
-
 from transformers import Wav2Vec2BertForCTC
+from transformers import AutoProcessor, AutoModelForPreTraining
+
+
+model_variant = 
 
 def calculate_word_scores(token_spans, transcript):
     """
@@ -147,15 +150,15 @@ def align(emission, tokens):
 
 
 
-text = 'Nuclear fusion on a large scale in an explosion was first carried out in the Ivy Mike hydrogen bomb test'
-TRANSCRIPT = text.lower().split()
-oneline = pd.read_parquet('temp.parquet')
+# text = 'Nuclear fusion on a large scale in an explosion was first carried out in the Ivy Mike hydrogen bomb test'
+# TRANSCRIPT = text.lower().split()
+# oneline = pd.read_parquet('temp.parquet')
 
-first = oneline.iloc[0]['audio']['bytes']
-second = oneline.iloc[1]['audio']['bytes']
-third = oneline.iloc[2]['audio']['bytes']
+# first = oneline.iloc[0]['audio']['bytes']
+# second = oneline.iloc[1]['audio']['bytes']
+# third = oneline.iloc[2]['audio']['bytes']
 
-def process_audio(audio, default_tokenized_transcript=None):
+def process_audio(audio, default_tokenized_transcript=None, transcript=None):
     sample_rate, array = bytes_to_array(audio)
     input_values = processor(array, sampling_rate=16000, return_tensors="pt")
     with torch.no_grad():
@@ -164,7 +167,7 @@ def process_audio(audio, default_tokenized_transcript=None):
     predicted_ids = torch.argmax(output.logits, dim=-1)
     emission = output.logits
     emission_normalized = torch.nn.functional.softmax(emission, dim=-1)
-    tokenized_transcript = [vocab[letter] for word in TRANSCRIPT for letter in word]
+    # tokenized_transcript = [vocab[letter] for word in TRANSCRIPT for letter in word]
     if default_tokenized_transcript is not None:
         tokenized_transcript = default_tokenized_transcript
 
@@ -172,8 +175,9 @@ def process_audio(audio, default_tokenized_transcript=None):
 
     token_spans = torchaudio.functional.merge_tokens(aligned_tokens, alignment_scores)
 
-    word_scores = calculate_word_scores(token_spans, TRANSCRIPT)
+    word_scores = calculate_word_scores(token_spans, transcript)
     print_word_scores(word_scores)
+
 
     # print("Token\tTime\tScore")
     # for s in token_spans:
@@ -182,7 +186,7 @@ def process_audio(audio, default_tokenized_transcript=None):
     return tokenized_transcript
 
 
-tokenized_transcript = process_audio(first)
+# tokenized_transcript = process_audio(first)
 
 
 def m4a_to_bytes(file_path, target_sample_rate=16000):
@@ -214,6 +218,27 @@ def m4a_to_bytes(file_path, target_sample_rate=16000):
     return audio_bytes, target_sample_rate
 
 # Example usage:
-audio_bytes, sample_rate = m4a_to_bytes("test.m4a")
-process_audio(audio_bytes, tokenized_transcript)
+# audio_bytes, sample_rate = m4a_to_bytes("test.m4a")
+# process_audio(audio_bytes, tokenized_transcript)
+
+
+def main():
+    text = 'It is ten degrees with a chance of showers in London'
+    TRANSCRIPT = text.lower().split()
+    tokenized_transcript = [vocab[letter] for word in TRANSCRIPT for letter in word]
+    newtest = pd.read_parquet('both_accents.parquet')
+    scottish = newtest[newtest['accent'] == 'scottish']
+    southern = newtest[newtest['accent'] == 'southern']
+    print(len(scottish), len(southern))
+    firstscottish = scottish.iloc[0]['audio']['bytes']
+    firstsouthern = southern.iloc[0]['audio']['bytes']
+
+    process_audio(firstscottish, tokenized_transcript, TRANSCRIPT)
+    process_audio(firstsouthern, tokenized_transcript, TRANSCRIPT)
+
+
+
+
+if __name__ == "__main__":
+    main()
 
