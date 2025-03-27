@@ -663,7 +663,7 @@ def main():
     # fig = plt.figure(figsize=(20, 8))
     
     # t-SNE - 2D
-    plt.subplot(121)
+    plt.figure(figsize=(20, 16), dpi=300)  # Increased figure size and DPI for high resolution
     tsne = TSNE(n_components=2, random_state=42)
     tsne_result = tsne.fit_transform(embeddings)
     for i in range(NUM_ACCENT_CLASSES):
@@ -671,21 +671,28 @@ def main():
         plt.scatter(tsne_result[mask, 0], tsne_result[mask, 1], 
                    color=distinct_colors[i], label=ID_TO_ACCENT[i], alpha=0.6)
     plt.grid(True, alpha=0.3)
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.title('t-SNE visualization of accent embeddings (2D)')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=12)
+    plt.title('t-SNE visualization of accent embeddings (2D)', fontsize=16)
+    plt.tight_layout()
+    plt.savefig('tsne_2d_accents.png', dpi=300, bbox_inches='tight')
     
     # t-SNE - 3D
+    fig = plt.figure(figsize=(20, 16), dpi=300)  # Increased figure size and DPI for high resolution
     tsne3d = TSNE(n_components=3, random_state=42)
     tsne3d_result = tsne3d.fit_transform(embeddings)
     
-    ax = fig.add_subplot(122, projection='3d')
+    ax = fig.add_subplot(111, projection='3d')
     for i in range(NUM_ACCENT_CLASSES):
         mask = accent_labels == i
         ax.scatter(tsne3d_result[mask, 0], tsne3d_result[mask, 1], tsne3d_result[mask, 2],
                   color=distinct_colors[i], label=ID_TO_ACCENT[i], alpha=0.6)
     ax.grid(True, alpha=0.3)
-    ax.set_title('t-SNE visualization of accent embeddings (3D)')
+    ax.set_title('t-SNE visualization of accent embeddings (3D)', fontsize=16)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=12)
     plt.tight_layout()
+    plt.savefig('tsne_3d_accents.png', dpi=300, bbox_inches='tight')
+    
+    # Show the plots after saving
     plt.show()
 
 
