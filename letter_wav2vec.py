@@ -32,7 +32,7 @@ import json
 
 _ESPEAK_LIBRARY = '/opt/homebrew/Cellar/espeak-ng/1.52.0/lib/libespeak-ng.1.dylib'  #use the Path to the library.
 EspeakWrapper.set_library(_ESPEAK_LIBRARY)
-backend = EspeakBackend('en-us')
+backend = EspeakBackend('en-gb-scotland')
 # returned = backend.phonemize(['Hello world'], separator=Separator(phone='-', word=' ', syllable='|'))
 
 # Get the full phoneme dictionary
@@ -109,7 +109,7 @@ def calculate_word_scores(token_spans, transcript):
         score = span.score
         
         # Skip padding or unknown tokens
-        if token in ["[PAD]", "[UNK]"]:
+        if token in ["<pad>", "<unk>"]:
             continue
             
         # Add letter to current word
@@ -143,7 +143,8 @@ def print_word_scores(word_scores):
     print("-" * 30)
     print("Word\t\tAverage Score")
     print("-" * 30)
-    
+    average_score = sum(word_scores.values()) / len(word_scores)
+    print(f"Average Score: {average_score:.4f}")
     for word, score in word_scores.items():
         # Add padding for better formatting
         padding = "\t\t" if len(word) < 8 else "\t"
@@ -193,14 +194,16 @@ def bytes_to_array(audio_bytes):
         )
     
     return sample_rate, audio_array
-tokenizer = Wav2Vec2PhonemeCTCTokenizer(vocab_file='phoneme_vocab.json')
-processor = Wav2Vec2BertProcessor.from_pretrained("facebook/wav2vec2-base", tokenizer=tokenizer)
-model = Wav2Vec2ForCTC.from_pretrained(
-    "facebook/wav2vec2-base", 
-    ctc_loss_reduction="mean", 
-    pad_token_id=vocab["[PAD]"],
-)
+# tokenizer = Wav2Vec2PhonemeCTCTokenizer(vocab_file='phoneme_vocab.json')
+processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-xlsr-53-espeak-cv-ft")
+tokenizer = processor.tokenizer
+model = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-xlsr-53-espeak-cv-ft")
+vocab = tokenizer.get_vocab()
+with open('wav2vec-phoneme-vocab.json', 'w') as f:
+    json.dump(vocab, f, indent=2)
 
+# vocab['[UNK]'] = len(vocab)
+# vocab['[PAD]'] = len(vocab)
 
 # print(tokenizer)
 
@@ -216,8 +219,7 @@ def align(emission, tokens):
     targets = torch.tensor([tokens], dtype=torch.int32, device="cpu")
     print(targets.shape, 'targets')
     print(emission.shape, 'emission')
-
-    alignments, scores = torchaudio.functional.forced_align(emission, targets, blank=0)
+    alignments, scores = torchaudio.functional.forced_align(emission, targets)
 
     alignments, scores = alignments[0], scores[0]  # remove batch dimension for simplicity
     # print(scores, 'scores')
@@ -232,7 +234,7 @@ def process_audio(audio, default_tokenized_transcript=None, transcript=None):
         array = np.pad(array, (0, max(400 - len(array), 0)), mode='constant')
     input_values = processor(array, sampling_rate=16000, return_tensors="pt")
     with torch.no_grad():
-        output = model(input_values.input_features.squeeze(0))
+        output = model(input_values.input_values)
     
     predicted_ids = torch.argmax(output.logits, dim=-1)
     predicted_tokens = [LABELS[id.item()] for id in predicted_ids[0]]
@@ -292,10 +294,12 @@ def main():
     text = 'It is ten degrees with a chance of showers in London'
     TRANSCRIPT = text.lower().split()
     phenomized = backend.phonemize([text], separator=Separator(phone='-', word='', syllable=None))
+    wordphonemized = backend.phonemize([text], separator=Separator(phone='', word=' ', syllable=None))
+    separate_words = wordphonemized[0].split(' ')
     print(phenomized, 'phenomized')
     returned = phenomized[0].split('-')
     print(returned, 'returned')
-    tokenized_transcript = [vocab.get(phenome, vocab['[UNK]']) for phenome in returned]
+    tokenized_transcript = [vocab.get(phenome, vocab['<unk>']) for phenome in returned]
 
 
     newtest = pd.read_parquet('both_accents.parquet')
@@ -305,8 +309,8 @@ def main():
     firstscottish = scottish.iloc[0]['audio']['bytes']
     firstsouthern = southern.iloc[0]['audio']['bytes']
 
-    process_audio(firstscottish, tokenized_transcript)
-    process_audio(firstsouthern, tokenized_transcript)
+    process_audio(firstscottish, tokenized_transcript, separate_words)
+    process_audio(firstsouthern, tokenized_transcript, separate_words)
 
     
 
