@@ -1,3 +1,11 @@
+
+
+
+
+
+
+
+
 import io
 from pydub import AudioSegment
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
@@ -11,11 +19,72 @@ from scipy.io import wavfile
 import librosa
 import numpy as np
 import ipdb
-from transformers import Wav2Vec2BertForCTC
+from transformers import Wav2Vec2BertForCTC, Wav2Vec2PhonemeCTCTokenizer, Wav2Vec2BertProcessor
 from transformers import AutoProcessor, AutoModelForPreTraining
+from phonemizer import phonemize
+from torchaudio.datasets import CMUDict
+from phonemizer.separator import Separator
+from phonemizer.backend.espeak.wrapper import EspeakWrapper
+from phonemizer.backend import EspeakBackend
+
+import json
 
 
-model_variant = 
+_ESPEAK_LIBRARY = '/opt/homebrew/Cellar/espeak-ng/1.52.0/lib/libespeak-ng.1.dylib'  #use the Path to the library.
+EspeakWrapper.set_library(_ESPEAK_LIBRARY)
+backend = EspeakBackend('en-us')
+# returned = backend.phonemize(['Hello world'], separator=Separator(phone='-', word=' ', syllable='|'))
+
+# Get the full phoneme dictionary
+def get_phoneme_dictionary():
+    # Create a comprehensive word list - you can expand this
+    word_list = [
+        "hello", "world", "the", "quick", "brown", "fox", "jumps", "over", 
+        "lazy", "dog", "phoneme", "dictionary", "speech", "recognition",
+        "artificial", "intelligence", "machine", "learning", "audio", "processing"
+    ]
+    
+    # # You could also load a larger word list from a file
+    # with open('text8 dataset', 'r') as f:
+    #     word_list = [line.strip() for line in f]
+
+    with open('text8 dataset', "r") as f:
+        wikipedia_data = f.read(100000000)
+
+    word_list = wikipedia_data.strip().split()
+
+    
+    # Phonemize all words
+    phonemized = backend.phonemize(word_list, separator=Separator(phone='-', word=' ', syllable='|'))
+    
+    # Extract all unique phonemes
+    all_phonemes = set()
+    for phoneme_sequence in phonemized:
+        # Split by word separator and then by phone separator
+        for word in phoneme_sequence.split(' '):
+            for phoneme in word.split('-'):
+                if phoneme:  # Skip empty strings
+                    all_phonemes.add(phoneme)
+    
+    # Create a dictionary mapping phonemes to indices
+    phoneme_dict = {phoneme: idx for idx, phoneme in enumerate(sorted(all_phonemes))}
+    
+    # Add special tokens
+    phoneme_dict["[UNK]"] = len(phoneme_dict)
+    phoneme_dict["[PAD]"] = len(phoneme_dict)
+    
+    return phoneme_dict
+
+# Get and print the phoneme dictionary
+
+
+
+
+
+
+
+
+model_variant = "small"
 
 def calculate_word_scores(token_spans, transcript):
     """
@@ -82,6 +151,7 @@ def print_word_scores(word_scores):
 
 
 
+vocab = json.load(open('phoneme_vocab.json'))
 # vocab = {
 
 # }
@@ -123,23 +193,30 @@ def bytes_to_array(audio_bytes):
         )
     
     return sample_rate, audio_array
+tokenizer = Wav2Vec2PhonemeCTCTokenizer(vocab_file='phoneme_vocab.json')
+processor = Wav2Vec2BertProcessor.from_pretrained("facebook/wav2vec2-base", tokenizer=tokenizer)
+model = Wav2Vec2ForCTC.from_pretrained(
+    "facebook/wav2vec2-base", 
+    ctc_loss_reduction="mean", 
+    pad_token_id=vocab["[PAD]"],
+)
 
-processor = AutoProcessor.from_pretrained("hf-audio/wav2vec2-bert-CV16-en")
-model = Wav2Vec2BertForCTC.from_pretrained("hf-audio/wav2vec2-bert-CV16-en")
 
-tokenizer = processor.tokenizer
-vocab = tokenizer.get_vocab()
+# print(tokenizer)
 
-# tokenizer = processor.tokenizer
-# vocab = tokenizer.get_vocab()
-# print(vocab)
+# # tokenizer = processor.tokenizer
+# # vocab = tokenizer.get_vocab()
+# # print(vocab)
 LABELS = {v: k for k, v in vocab.items()}
-# print(LABELS)
+# # print(LABELS)
 
 df = pd.read_parquet("dataframes/accent_corp10.parquet")
 
 def align(emission, tokens):
     targets = torch.tensor([tokens], dtype=torch.int32, device="cpu")
+    print(targets.shape, 'targets')
+    print(emission.shape, 'emission')
+
     alignments, scores = torchaudio.functional.forced_align(emission, targets, blank=0)
 
     alignments, scores = alignments[0], scores[0]  # remove batch dimension for simplicity
@@ -148,40 +225,32 @@ def align(emission, tokens):
     # print(scores, 'scores')
     return alignments, scores
 
-
-
-# text = 'Nuclear fusion on a large scale in an explosion was first carried out in the Ivy Mike hydrogen bomb test'
-# TRANSCRIPT = text.lower().split()
-# oneline = pd.read_parquet('temp.parquet')
-
-# first = oneline.iloc[0]['audio']['bytes']
-# second = oneline.iloc[1]['audio']['bytes']
-# third = oneline.iloc[2]['audio']['bytes']
-
 def process_audio(audio, default_tokenized_transcript=None, transcript=None):
     sample_rate, array = bytes_to_array(audio)
+    if len(array) < 400:  # Minimum length needed for wav2vec2 model
+        print(f"Warning: Audio too short ({len(array)} samples). Padding to minimum length.")
+        array = np.pad(array, (0, max(400 - len(array), 0)), mode='constant')
     input_values = processor(array, sampling_rate=16000, return_tensors="pt")
     with torch.no_grad():
-        output = model(input_values.input_features)
+        output = model(input_values.input_features.squeeze(0))
     
     predicted_ids = torch.argmax(output.logits, dim=-1)
+    predicted_tokens = [LABELS[id.item()] for id in predicted_ids[0]]
+    predicted_text = ''.join([token for token in predicted_tokens if token not in ['[PAD]', '[UNK]']])
+    print(f"Predicted text: {predicted_text}")
     emission = output.logits
     emission_normalized = torch.nn.functional.softmax(emission, dim=-1)
+    
     # tokenized_transcript = [vocab[letter] for word in TRANSCRIPT for letter in word]
     if default_tokenized_transcript is not None:
         tokenized_transcript = default_tokenized_transcript
-
+    print(tokenized_transcript, 'tokenized_transcript')
     aligned_tokens, alignment_scores = align(emission_normalized, tokenized_transcript)
 
     token_spans = torchaudio.functional.merge_tokens(aligned_tokens, alignment_scores)
 
     word_scores = calculate_word_scores(token_spans, transcript)
     print_word_scores(word_scores)
-
-
-    # print("Token\tTime\tScore")
-    # for s in token_spans:
-    #     print(f"{LABELS[s.token]}\t[{s.start:3d}, {s.end:3d})\t{s.score:.2f}")
     
     return tokenized_transcript
 
@@ -217,15 +286,18 @@ def m4a_to_bytes(file_path, target_sample_rate=16000):
     
     return audio_bytes, target_sample_rate
 
-# Example usage:
-# audio_bytes, sample_rate = m4a_to_bytes("test.m4a")
-# process_audio(audio_bytes, tokenized_transcript)
 
 
 def main():
     text = 'It is ten degrees with a chance of showers in London'
     TRANSCRIPT = text.lower().split()
-    tokenized_transcript = [vocab[letter] for word in TRANSCRIPT for letter in word]
+    phenomized = backend.phonemize([text], separator=Separator(phone='-', word='', syllable=None))
+    print(phenomized, 'phenomized')
+    returned = phenomized[0].split('-')
+    print(returned, 'returned')
+    tokenized_transcript = [vocab.get(phenome, vocab['[UNK]']) for phenome in returned]
+
+
     newtest = pd.read_parquet('both_accents.parquet')
     scottish = newtest[newtest['accent'] == 'scottish']
     southern = newtest[newtest['accent'] == 'southern']
@@ -233,12 +305,25 @@ def main():
     firstscottish = scottish.iloc[0]['audio']['bytes']
     firstsouthern = southern.iloc[0]['audio']['bytes']
 
-    process_audio(firstscottish, tokenized_transcript, TRANSCRIPT)
-    process_audio(firstsouthern, tokenized_transcript, TRANSCRIPT)
+    process_audio(firstscottish, tokenized_transcript)
+    process_audio(firstsouthern, tokenized_transcript)
 
+    
 
 
 
 if __name__ == "__main__":
     main()
 
+
+# phoneme_dict = get_phoneme_dictionary()
+#     print("\nFull Phoneme Dictionary:")
+#     for phoneme, idx in phoneme_dict.items():
+#         print(f"{phoneme}: {idx}")
+
+#     # Optionally save to a file
+
+#     with open('phoneme_vocab.json', 'w') as f:
+#         json.dump(phoneme_dict, f, indent=2)
+        
+#     print(f"\nSaved phoneme dictionary with {len(phoneme_dict)} entries to phoneme_vocab.json")
