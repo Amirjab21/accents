@@ -32,7 +32,8 @@ import json
 
 _ESPEAK_LIBRARY = '/opt/homebrew/Cellar/espeak-ng/1.52.0/lib/libespeak-ng.1.dylib'  #use the Path to the library.
 EspeakWrapper.set_library(_ESPEAK_LIBRARY)
-backend = EspeakBackend('en-gb-scotland')
+language = 'en-gb-scotland'#'en-gb-scotland'
+backend = EspeakBackend(language)
 # returned = backend.phonemize(['Hello world'], separator=Separator(phone='-', word=' ', syllable='|'))
 
 # Get the full phoneme dictionary
@@ -143,6 +144,7 @@ def print_word_scores(word_scores):
     print("-" * 30)
     print("Word\t\tAverage Score")
     print("-" * 30)
+    
     average_score = sum(word_scores.values()) / len(word_scores)
     print(f"Average Score: {average_score:.4f}")
     for word, score in word_scores.items():
@@ -238,7 +240,7 @@ def process_audio(audio, default_tokenized_transcript=None, transcript=None):
     
     predicted_ids = torch.argmax(output.logits, dim=-1)
     predicted_tokens = [LABELS[id.item()] for id in predicted_ids[0]]
-    predicted_text = ''.join([token for token in predicted_tokens if token not in ['[PAD]', '[UNK]']])
+    predicted_text = ''.join([token for token in predicted_tokens if token not in ['<pad>', '<unk>']])
     print(f"Predicted text: {predicted_text}")
     emission = output.logits
     emission_normalized = torch.nn.functional.softmax(emission, dim=-1)
@@ -250,8 +252,9 @@ def process_audio(audio, default_tokenized_transcript=None, transcript=None):
     aligned_tokens, alignment_scores = align(emission_normalized, tokenized_transcript)
 
     token_spans = torchaudio.functional.merge_tokens(aligned_tokens, alignment_scores)
-
+    
     word_scores = calculate_word_scores(token_spans, transcript)
+    ipdb.set_trace()
     print_word_scores(word_scores)
     
     return tokenized_transcript
@@ -291,11 +294,12 @@ def m4a_to_bytes(file_path, target_sample_rate=16000):
 
 
 def main():
-    text = 'It is ten degrees with a chance of showers in London'
+    text = 'The width of the coloured band increases as the size of the drops increases'
     TRANSCRIPT = text.lower().split()
     phenomized = backend.phonemize([text], separator=Separator(phone='-', word='', syllable=None))
     wordphonemized = backend.phonemize([text], separator=Separator(phone='', word=' ', syllable=None))
     separate_words = wordphonemized[0].split(' ')
+    print(separate_words, 'separate_words')
     print(phenomized, 'phenomized')
     returned = phenomized[0].split('-')
     print(returned, 'returned')
@@ -312,13 +316,29 @@ def main():
     process_audio(firstscottish, tokenized_transcript, separate_words)
     process_audio(firstsouthern, tokenized_transcript, separate_words)
 
+
+def main_iranian():
+    textir = 'چکار میکنی لامصب کثافت'
+    backend_ir = EspeakBackend('fa')
+    phenomized = backend_ir.phonemize([textir], separator=Separator(phone='-', word=' ', syllable=None))
     
+    wordphonemized = backend_ir.phonemize([textir], separator=Separator(phone='', word=' ', syllable=None))
+    separate_words = wordphonemized[0].split(' ')
+    print(separate_words, 'separate_words')
+    print(phenomized, 'phenomized')
+    returned = phenomized[0].split('-')
+    print(returned, 'returned')
+    tokenized_transcript = [vocab.get(phenome, vocab['<unk>']) for phenome in returned]
+
+    audio_file_path = "iranian_audio2.m4a"
+    audio_bytes, sample_rate = m4a_to_bytes(audio_file_path)
+    process_audio(audio_bytes, tokenized_transcript, separate_words)
 
 
 
 if __name__ == "__main__":
-    main()
-
+    # main()
+    main_iranian()
 
 # phoneme_dict = get_phoneme_dictionary()
 #     print("\nFull Phoneme Dictionary:")
