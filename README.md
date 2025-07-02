@@ -5,6 +5,9 @@ This repository contains experiments for training accent classifiers using
 It also provides utilities for preparing data from the Common Voice corpus and
 visualising the resulting embeddings.
 
+Use my model via Huggingface:
+https://huggingface.co/Amirjab21/accent-classifier
+
 ## Repository layout
 
 ### Core modules
